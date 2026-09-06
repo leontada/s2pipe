@@ -25,6 +25,11 @@ export function nodeUrl(cookie?: string | null): string | undefined {
 			undefined;
 	}
 
+	if (!raw && typeof window !== "undefined") {
+		const port = env("NODE_PORT") || "5055";
+		raw = `${window.location.protocol}//${window.location.hostname}:${port}`;
+	}
+
 	return raw?.replace(/\/+$/, "") || undefined;
 }
 

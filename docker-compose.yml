@@ -62,4 +62,5 @@ services:
             - "${CLIENT_PORT}:${CLIENT_PORT}"
         environment:
             CLIENT_PORT: ${CLIENT_PORT}
+            NODE_PORT: ${NODE_PORT}
             NODE_BASE_URL: ${NODE_BASE_URL}

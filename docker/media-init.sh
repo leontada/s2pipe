@@ -3,6 +3,7 @@
 set -euo pipefail
 
 # 1. Generate MediaMTX config
+ice_hosts=$(echo "${MEDIA_ICE_IP}" | sed 's/[, ]\+/\n/g' | sed '/^$/d' | sed 's/^/"/;s/$/"/' | paste -sd, -)
 yaml=/tmp/s2pipe-mediamtx.yml
 cat > "$yaml" <<EOF
 logLevel: warn
@@ -15,7 +16,7 @@ webrtcEncryption: no
 webrtcAllowOrigins: ['*']
 webrtcLocalUDPAddress: :${MEDIA_ICE_PORT}
 webrtcIPsFromInterfaces: no
-webrtcAdditionalHosts: ["${MEDIA_ICE_IP}"]
+webrtcAdditionalHosts: [${ice_hosts}]
 rtmp: false
 srt: false
 playback: false

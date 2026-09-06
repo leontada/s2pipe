@@ -13,15 +13,24 @@ export default {
 	scripts: [],
 
 	head: null,
-	body: (req) => (
-		<Play
-			nodeUrl={nodeUrl(req.cookies.nodeUrl)!}
-			nodeLocked={nodeUrlLocked()}
-		/>
-	),
+	body: (req) => {
+		const port = Deno.env.get("NODE_PORT") || "5055";
+		const host = req.headers.get("host")?.split(":")[0];
+		const fallback = host ? `http://${host}:${port}` : undefined;
+		const url = nodeUrl(req.cookies.nodeUrl) || fallback;
+		return (
+			<Play
+				nodeUrl={url!}
+				nodeLocked={nodeUrlLocked()}
+			/>
+		);
+	},
 
 	onpost: null,
 	onrequest: (req, res) => {
-		if (!nodeUrl(req.cookies.nodeUrl)) return res.redirect("/set-node");
+		const port = Deno.env.get("NODE_PORT") || "5055";
+		const host = req.headers.get("host")?.split(":")[0];
+		const fallback = host ? `http://${host}:${port}` : undefined;
+		if (!nodeUrl(req.cookies.nodeUrl) && !fallback) return res.redirect("/set-node");
 	},
 } satisfies Page;
