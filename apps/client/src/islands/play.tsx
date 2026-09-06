@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Eye, Gamepad2, Maximize, Minimize, Settings, Volume2, VolumeX, X } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Maximize, Minimize, Settings, Volume2, VolumeX, X } from "lucide-preact";
 
 import type { CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -301,8 +301,14 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 	// Raccourci Clavier (Échap pour les paramètres)
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
-			if (event.code !== "Escape" || event.repeat) return;
-			settings.value = !settings.value;
+			if (event.repeat) return;
+			if (event.code === "Escape") {
+				settings.value = !settings.value;
+			} else if (event.code === "KeyI" || event.code === "F3") {
+				const target = event.target as HTMLElement | null;
+				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+				showStats.value = !showStats.value;
+			}
 		};
 		globalThis.addEventListener("keydown", onKey);
 		return () => globalThis.removeEventListener("keydown", onKey);
@@ -412,16 +418,24 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 			{showStats.value && (
 				<dl class="play-stats">
 					<div>
-						<dt>Bitrate</dt>
-						<dd>{stats.value ? `${stats.value.bitrateKbps} kb/s` : "-"}</dd>
+						<dt>Ping</dt>
+						<dd class={stats.value?.rttMs != null ? (stats.value.rttMs < 30 ? "stat-good" : stats.value.rttMs < 80 ? "stat-warn" : "stat-bad") : ""}>
+							{stats.value?.rttMs != null ? `${stats.value.rttMs} ms` : "-"}
+						</dd>
 					</div>
 					<div>
 						<dt>FPS</dt>
 						<dd>{stats.value ? Math.round(stats.value.fps) : "-"}</dd>
 					</div>
 					<div>
+						<dt>Bitrate</dt>
+						<dd>{stats.value ? (stats.value.bitrateKbps >= 1000 ? `${(stats.value.bitrateKbps / 1000).toFixed(1)} Mb/s` : `${stats.value.bitrateKbps} kb/s`) : "-"}</dd>
+					</div>
+					<div>
 						<dt>Lost</dt>
-						<dd>{stats.value ? stats.value.packetsLost : "-"}</dd>
+						<dd class={stats.value && stats.value.packetsLost > 0 ? "stat-bad" : ""}>
+							{stats.value ? stats.value.packetsLost : "-"}
+						</dd>
 					</div>
 				</dl>
 			)}
@@ -488,6 +502,16 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						)}
 					</label>
 					<div class="play-tools">
+						<button
+							type="button"
+							class="btn btn-icon"
+							aria-label="Stats"
+							title="Overlay Stats (I)"
+							data-active={showStats.value ? "true" : undefined}
+							onClick={() => showStats.value = !showStats.value}
+						>
+							<Activity size={16} />
+						</button>
 						<button
 							type="button"
 							class="btn btn-icon"

@@ -173,6 +173,8 @@ export type StreamStats = {
 	bitrateKbps: number;
 	fps: number;
 	packetsLost: number;
+	rttMs: number | null;
+	jitterMs: number | null;
 };
 
 export async function readStreamStats(
@@ -183,19 +185,37 @@ export async function readStreamStats(
 	let bytes = 0;
 	let fps = 0;
 	let packetsLost = 0;
+	let rttMs: number | null = null;
+	let jitterMs: number | null = null;
 	let at = performance.now();
 
 	for (const item of report.values()) {
-		if (item.type !== "inbound-rtp" || item.kind !== "video") continue;
-		bytes = item.bytesReceived ?? 0;
-		fps = item.framesPerSecond ?? 0;
-		packetsLost = item.packetsLost ?? 0;
-		at = item.timestamp ?? at;
+		if (item.type === "inbound-rtp" && item.kind === "video") {
+			bytes = item.bytesReceived ?? 0;
+			fps = item.framesPerSecond ?? 0;
+			packetsLost = item.packetsLost ?? 0;
+			at = item.timestamp ?? at;
+			if (typeof item.jitter === "number") {
+				jitterMs = Math.round(item.jitter * 1000);
+			}
+		} else if (
+			item.type === "candidate-pair" &&
+			(item.state === "succeeded" || item.nominated || item.selected)
+		) {
+			const rtt = item.currentRoundTripTime ?? item.roundTripTime;
+			if (typeof rtt === "number") {
+				rttMs = Math.round(rtt * 1000);
+			}
+		} else if (item.type === "remote-inbound-rtp" && rttMs === null) {
+			if (typeof item.roundTripTime === "number") {
+				rttMs = Math.round(item.roundTripTime * 1000);
+			}
+		}
 	}
 
 	const elapsed = prev ? Math.max(1, at - prev.at) : 1000;
 	const delta = prev ? Math.max(0, bytes - prev.bytes) : 0;
 	const bitrateKbps = Math.round((delta * 8) / elapsed);
 
-	return { stats: { bitrateKbps, fps, packetsLost }, prev: { bytes, at } };
+	return { stats: { bitrateKbps, fps, packetsLost, rttMs, jitterMs }, prev: { bytes, at } };
 }

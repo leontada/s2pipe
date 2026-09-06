@@ -564,3 +564,29 @@
 		word-break: break-all;
 	}
 }
+
+.play-stats {
+	min-width: 7.5rem;
+	background: rgb(7 8 10 / 0.82);
+	backdrop-filter: blur(8px);
+}
+
+.play-stats .stat-good {
+	color: #10b981;
+	font-weight: 600;
+}
+
+.play-stats .stat-warn {
+	color: #f59e0b;
+	font-weight: 600;
+}
+
+.play-stats .stat-bad {
+	color: #ef4444;
+	font-weight: 600;
+}
+
+.btn[data-active="true"] {
+	color: var(--accent);
+	background: var(--surface-active, rgba(255, 255, 255, 0.12));
+}
