@@ -7,11 +7,15 @@ import {
 	dropViewer,
 	forEachViewer,
 	getSeatStates,
+	isAllMuted,
+	isSeatMuted,
 	kickAllSeats,
 	kickSeat,
 	padOf,
 	playingCount,
 	playPad,
+	setAllMuted,
+	setSeatMuted,
 	viewerCount,
 	watchPad,
 } from "@/services/sockets.ts";
@@ -32,6 +36,7 @@ function pushAdminState(targetWs?: WebSocket): void {
 		data: {
 			viewers: viewerCount(),
 			seats: getSeatStates(),
+			allMuted: isAllMuted(),
 		},
 	};
 	if (targetWs) {
@@ -111,6 +116,12 @@ function bind(ws: WebSocket): void {
 					});
 					if (existing === undefined && seat !== undefined) {
 						clearPad(seat);
+						if (isSeatMuted(seat)) {
+							send(ws, {
+								op: "input_status",
+								data: { muted: true, reason: "admin" },
+							});
+						}
 						void pushStatus();
 					}
 					return;
@@ -124,7 +135,7 @@ function bind(ws: WebSocket): void {
 				}
 				case "pad": {
 					const seat = padOf(ws);
-					if (seat !== undefined) setPad(seat, msg.data);
+					if (seat !== undefined && !isSeatMuted(seat)) setPad(seat, msg.data);
 					return;
 				}
 				case "admin_login": {
@@ -159,6 +170,32 @@ function bind(ws: WebSocket): void {
 					if (kickedList.length > 0) {
 						void pushStatus();
 					}
+					return;
+				}
+				case "admin_mute_seat": {
+					if (!adminSockets.has(ws)) return;
+					const playerWs = setSeatMuted(msg.seat, msg.muted);
+					if (playerWs) {
+						if (msg.muted) clearPad(msg.seat);
+						send(playerWs, {
+							op: "input_status",
+							data: { muted: msg.muted, reason: "admin" },
+						});
+					}
+					pushAdminState();
+					return;
+				}
+				case "admin_mute_all": {
+					if (!adminSockets.has(ws)) return;
+					const activePlayers = setAllMuted(msg.muted);
+					for (const item of activePlayers) {
+						if (msg.muted) clearPad(item.seat);
+						send(item.ws, {
+							op: "input_status",
+							data: { muted: msg.muted, reason: "admin" },
+						});
+					}
+					pushAdminState();
 					return;
 				}
 			}

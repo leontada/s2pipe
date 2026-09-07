@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Settings, Shield, UserX, Volume2, VolumeX, X } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, UserX, Volume2, VolumeX, X } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -113,6 +113,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 	const adminPasswordInput = useSignal("");
 	const adminError = useSignal("");
 	const adminState = useSignal<AdminState | null>(null);
+	const inputMuted = useSignal(false);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -239,6 +240,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						} else {
 							playRequested.current = false;
 							playing.value = false;
+							inputMuted.value = false;
 							if (msg.data.error === "invalid_pin") {
 								pinModalOpen.value = true;
 								pinError.value = "Incorrect PIN. Please try again.";
@@ -285,6 +287,15 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						if (typeof msg.data.viewers === "number") {
 							viewersCount.value = msg.data.viewers;
 						}
+					} else if (msg.op === "input_status") {
+						if (inputMuted.value !== msg.data.muted) {
+							inputMuted.value = msg.data.muted;
+							if (msg.data.muted) {
+								toast("⚠️ Controls paused by administrator");
+							} else {
+								toast("🎮 Controls resumed by administrator");
+							}
+						}
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -297,6 +308,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 				wsRef.current = null;
 				playRequested.current = false;
 				playing.value = false;
+				inputMuted.value = false;
 				connected.value = false;
 				adminAuthed.value = false;
 				if (!isClosed) {
@@ -491,9 +503,26 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 		}
 	}
 
+	function toggleSeatMute(seat: number, currentlyMuted: boolean): void {
+		send(wsRef.current, {
+			op: "admin_mute_seat",
+			seat,
+			muted: !currentlyMuted,
+		});
+	}
+
+	function toggleAllMute(): void {
+		const next = !(adminState.value?.allMuted ?? false);
+		send(wsRef.current, {
+			op: "admin_mute_all",
+			muted: next,
+		});
+	}
+
 	function watch(): void {
 		playRequested.current = false;
 		playing.value = false;
+		inputMuted.value = false;
 		send(wsRef.current, { op: "watch" });
 	}
 
@@ -609,6 +638,12 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						</button>
 					</div>
 					<div class="play-status">
+						{playing.value && inputMuted.value && (
+							<span class="pill pill-muted" title="Your gamepad inputs are currently paused by the administrator">
+								<Pause size={12} aria-hidden="true" />
+								Inputs Paused
+							</span>
+						)}
 						<span class="pill" data-ok={capture.value?.running ? "true" : "false"}>
 							Capture {capture.value?.running ? "live" : "down"}
 						</span>
@@ -640,6 +675,9 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						</select>
 						{connected.value && !playing.value && (
 							<span class="play-hint">Click Play, then use a gamepad.</span>
+						)}
+						{connected.value && playing.value && inputMuted.value && (
+							<span class="play-hint play-hint-warn">⚠️ Gamepad inputs paused by admin</span>
 						)}
 					</label>
 					<div class="play-tools">
@@ -792,35 +830,67 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 									<span>
 										Audience: <strong>{adminState.value?.viewers ?? viewersCount.value}</strong>
 									</span>
-									<button
-										type="button"
-										class="btn btn-danger btn-xs"
-										onClick={kickAllSeats}
-										title="Kick all players to audience"
-									>
-										Kick All
-									</button>
+									<div class="admin-global-actions">
+										<button
+											type="button"
+											class={`btn btn-xs ${adminState.value?.allMuted ? "btn-warn" : "btn-secondary"}`}
+											onClick={toggleAllMute}
+											title="Pause or resume inputs for all players"
+										>
+											{adminState.value?.allMuted ? (
+												<>
+													<PlayIcon size={12} /> Resume All
+												</>
+											) : (
+												<>
+													<Pause size={12} /> Pause All
+												</>
+											)}
+										</button>
+										<button
+											type="button"
+											class="btn btn-danger btn-xs"
+											onClick={kickAllSeats}
+											title="Kick all players to audience"
+										>
+											Kick All
+										</button>
+									</div>
 								</div>
 								<div class="admin-seats-list">
-									{(adminState.value?.seats ?? [0, 1, 2, 3].map((i) => ({ seat: i, occupied: false }))).map((s) => (
+									{(adminState.value?.seats ?? [0, 1, 2, 3].map((i) => ({ seat: i, occupied: false, muted: false }))).map((s) => (
 										<div key={s.seat} class="admin-seat-row">
 											<span class="admin-seat-label">
 												Slot {s.seat + 1}:{" "}
 												{s.occupied ? (
-													<span class="seat-badge seat-occupied">Occupied</span>
+													<span class={`seat-badge ${s.muted ? "seat-muted" : "seat-occupied"}`}>
+														{s.muted ? "Paused" : "Playing"}
+													</span>
 												) : (
 													<span class="seat-badge seat-vacant">Vacant</span>
 												)}
 											</span>
 											{s.occupied && (
-												<button
-													type="button"
-													class="btn btn-danger btn-xs"
-													onClick={() => kickSeat(s.seat)}
-												>
-													<UserX size={12} />
-													Kick
-												</button>
+												<div class="admin-seat-actions">
+													<button
+														type="button"
+														class={`btn btn-xs ${s.muted ? "btn-warn" : "btn-secondary"}`}
+														onClick={() => toggleSeatMute(s.seat, s.muted)}
+														title={s.muted ? "Resume player controls" : "Pause player controls"}
+													>
+														{s.muted ? <PlayIcon size={12} /> : <Pause size={12} />}
+														{s.muted ? "Resume" : "Pause"}
+													</button>
+													<button
+														type="button"
+														class="btn btn-danger btn-xs"
+														onClick={() => kickSeat(s.seat)}
+														title="Kick to audience"
+													>
+														<UserX size={12} />
+														Kick
+													</button>
+												</div>
 											)}
 										</div>
 									))}
