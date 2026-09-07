@@ -38,4 +38,6 @@ export const config = {
 	switchBtMac: parseMac(env("SWITCH_BT_MAC")),
 	controllerBtMac: parseMac(env("CONTROLLER_BT_MAC")),
 	controllerBtPid: parsePid(env("CONTROLLER_BT_PID"), 0x2069),
+	playerPin: env("PLAYER_PIN", "").trim(),
+	adminPassword: env("ADMIN_PASSWORD", "").trim(),
 } as const;

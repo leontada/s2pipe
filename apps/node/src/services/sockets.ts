@@ -48,3 +48,32 @@ export function forEachViewer(fn: (ws: WebSocket) => void): void {
 		if (viewer.readyState === WebSocket.OPEN) fn(viewer);
 	}
 }
+
+export function kickSeat(seatIndex: number): WebSocket | null {
+	if (seatIndex < 0 || seatIndex >= seats.length) return null;
+	const ws = seats[seatIndex];
+	if (ws) {
+		seats[seatIndex] = null;
+		return ws;
+	}
+	return null;
+}
+
+export function kickAllSeats(): { seat: number; ws: WebSocket }[] {
+	const kicked: { seat: number; ws: WebSocket }[] = [];
+	for (let i = 0; i < seats.length; i++) {
+		const ws = seats[i];
+		if (ws) {
+			kicked.push({ seat: i, ws });
+			seats[i] = null;
+		}
+	}
+	return kicked;
+}
+
+export function getSeatStates(): { seat: number; occupied: boolean }[] {
+	return seats.map((ws, i) => ({
+		seat: i,
+		occupied: ws !== null,
+	}));
+}

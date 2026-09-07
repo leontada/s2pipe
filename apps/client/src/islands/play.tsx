@@ -1,8 +1,8 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Maximize, Minimize, Settings, Volume2, VolumeX, X } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Settings, Shield, UserX, Volume2, VolumeX, X } from "lucide-preact";
 
-import type { CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
+import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
 
 import {
@@ -101,6 +101,18 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 	const fullscreen = useSignal(false);
 	const live = useSignal(false);
 	const toasts = useSignal<Toast[]>([]);
+
+	// Access Control & Admin signals
+	const pinRequired = useSignal(false);
+	const pinModalOpen = useSignal(false);
+	const pinInput = useSignal("");
+	const pinError = useSignal("");
+	const lastAttemptedPin = useSignal("");
+	const viewersCount = useSignal(0);
+	const adminAuthed = useSignal(false);
+	const adminPasswordInput = useSignal("");
+	const adminError = useSignal("");
+	const adminState = useSignal<AdminState | null>(null);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -201,6 +213,12 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 
 			socket.addEventListener("open", () => {
 				connected.value = true;
+				try {
+					const savedAdmin = sessionStorage.getItem("s2pipe_admin_pass");
+					if (savedAdmin) {
+						send(socket, { op: "admin_login", password: savedAdmin });
+					}
+				} catch {}
 			});
 
 			socket.addEventListener("message", (event) => {
@@ -208,15 +226,65 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 				try {
 					const msg = JSON.parse(event.data) as ServerMessage;
 					if (msg.op === "play") {
-						if (!playRequested.current) return;
-						playRequested.current = false;
-						playing.value = msg.data.playing;
-						if (!msg.data.playing) toast("All remote pads are taken.");
+						if (msg.data.playing) {
+							playing.value = true;
+							playRequested.current = false;
+							pinModalOpen.value = false;
+							pinError.value = "";
+							if (lastAttemptedPin.value) {
+								try {
+									localStorage.setItem("s2pipe_player_pin", lastAttemptedPin.value);
+								} catch {}
+							}
+						} else {
+							playRequested.current = false;
+							playing.value = false;
+							if (msg.data.error === "invalid_pin") {
+								pinModalOpen.value = true;
+								pinError.value = "Incorrect PIN. Please try again.";
+								try {
+									localStorage.removeItem("s2pipe_player_pin");
+								} catch {}
+							} else if (msg.data.error === "kicked_by_admin") {
+								toast("You were moved to the audience by an admin.");
+							} else if (msg.data.error === "all_seats_full") {
+								toast("All remote pads are currently occupied.");
+							} else {
+								toast("Unable to take a pad.");
+							}
+						}
 					} else if (msg.op === "status") {
 						capture.value = msg.data.capture;
 						if (!msg.data.capture.running) live.value = false;
 						pico.value = msg.data.pico;
 						playingCount.value = msg.data.playing;
+						if (typeof msg.data.viewers === "number") {
+							viewersCount.value = msg.data.viewers;
+						}
+						if (typeof msg.data.pinRequired === "boolean") {
+							pinRequired.value = msg.data.pinRequired;
+						}
+					} else if (msg.op === "admin_auth") {
+						if (msg.data.ok) {
+							adminAuthed.value = true;
+							adminError.value = "";
+							if (adminPasswordInput.value) {
+								try {
+									sessionStorage.setItem("s2pipe_admin_pass", adminPasswordInput.value);
+								} catch {}
+							}
+							toast("Admin mode authenticated.");
+						} else {
+							adminError.value = "Incorrect admin password.";
+							try {
+								sessionStorage.removeItem("s2pipe_admin_pass");
+							} catch {}
+						}
+					} else if (msg.op === "admin_state") {
+						adminState.value = msg.data;
+						if (typeof msg.data.viewers === "number") {
+							viewersCount.value = msg.data.viewers;
+						}
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -230,6 +298,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 				playRequested.current = false;
 				playing.value = false;
 				connected.value = false;
+				adminAuthed.value = false;
 				if (!isClosed) {
 					retryTimer = globalThis.setTimeout(connectWs, 1500);
 				}
@@ -351,10 +420,75 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 		return () => document.removeEventListener("fullscreenchange", onFs);
 	}, []);
 
-	function play(): void {
+	function requestPlay(pin?: string): void {
 		if (playing.value || wsRef.current?.readyState !== WebSocket.OPEN) return;
 		playRequested.current = true;
-		send(wsRef.current, { op: "play" });
+		lastAttemptedPin.value = pin ?? "";
+		send(wsRef.current, { op: "play", pin });
+	}
+
+	function play(): void {
+		if (playing.value || wsRef.current?.readyState !== WebSocket.OPEN) return;
+		if (pinRequired.value) {
+			let savedPin = "";
+			try {
+				savedPin = localStorage.getItem("s2pipe_player_pin") ?? "";
+			} catch {}
+			if (savedPin) {
+				requestPlay(savedPin);
+				return;
+			}
+			pinInput.value = "";
+			pinError.value = "";
+			pinModalOpen.value = true;
+			return;
+		}
+		requestPlay();
+	}
+
+	function submitPin(event?: Event): void {
+		event?.preventDefault();
+		const pin = pinInput.value.trim();
+		if (!pin) {
+			pinError.value = "Please enter the PIN.";
+			return;
+		}
+		requestPlay(pin);
+	}
+
+	function cancelPin(): void {
+		pinModalOpen.value = false;
+		pinError.value = "";
+		playRequested.current = false;
+	}
+
+	function submitAdminLogin(event?: Event): void {
+		event?.preventDefault();
+		const pass = adminPasswordInput.value.trim();
+		if (!pass) {
+			adminError.value = "Please enter the password.";
+			return;
+		}
+		adminError.value = "";
+		send(wsRef.current, { op: "admin_login", password: pass });
+	}
+
+	function adminLogout(): void {
+		adminAuthed.value = false;
+		adminPasswordInput.value = "";
+		try {
+			sessionStorage.removeItem("s2pipe_admin_pass");
+		} catch {}
+	}
+
+	function kickSeat(seat: number): void {
+		send(wsRef.current, { op: "admin_kick", seat });
+	}
+
+	function kickAllSeats(): void {
+		if (confirm("Kick all active players to audience?")) {
+			send(wsRef.current, { op: "admin_kick_all" });
+		}
 	}
 
 	function watch(): void {
@@ -446,7 +580,14 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 						<span>s2</span>pipe
 					</span>
 					<div class="play-slots">
-						<span class="play-count">{playingCount.value}/{PAD_COUNT} playing</span>
+						<span class="play-count">
+							{playingCount.value}/{PAD_COUNT} playing
+							{viewersCount.value > 0 && (
+								<span class="play-viewers-tag" title={`${viewersCount.value} connected viewer${viewersCount.value > 1 ? "s" : ""}`}>
+									· {viewersCount.value} viewer{viewersCount.value > 1 ? "s" : ""}
+								</span>
+							)}
+						</span>
 						<button
 							type="button"
 							class="play-slot"
@@ -454,7 +595,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 							disabled={padsFull}
 							onClick={play}
 						>
-							<Gamepad2 size={14} aria-hidden="true" />
+							{pinRequired.value && !playing.value ? <Lock size={14} aria-hidden="true" /> : <Gamepad2 size={14} aria-hidden="true" />}
 							Play
 						</button>
 						<button
@@ -611,7 +752,126 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 							controller". Until then, View+Menu is Home.
 						</p>
 					</section>
+
+					<section class="play-admin-section">
+						<div class="play-admin-header">
+							<div class="play-admin-title">
+								<Shield size={16} />
+								<h3>Admin Backoffice</h3>
+							</div>
+							{adminAuthed.value && (
+								<button
+									type="button"
+									class="btn btn-xs"
+									onClick={adminLogout}
+								>
+									Logout
+								</button>
+							)}
+						</div>
+						{!adminAuthed.value ? (
+							<form onSubmit={submitAdminLogin} class="admin-login-form">
+								<p class="admin-desc">Room &amp; player access management</p>
+								<div class="admin-login-row">
+									<input
+										type="password"
+										class="admin-input"
+										placeholder="Admin password..."
+										value={adminPasswordInput.value}
+										onInput={(event) => adminPasswordInput.value = (event.target as HTMLInputElement).value}
+									/>
+									<button type="submit" class="btn btn-primary btn-sm">
+										Login
+									</button>
+								</div>
+								{adminError.value && <p class="play-modal-error">{adminError.value}</p>}
+							</form>
+						) : (
+							<div class="admin-dashboard">
+								<div class="admin-stats-row">
+									<span>
+										Audience: <strong>{adminState.value?.viewers ?? viewersCount.value}</strong>
+									</span>
+									<button
+										type="button"
+										class="btn btn-danger btn-xs"
+										onClick={kickAllSeats}
+										title="Kick all players to audience"
+									>
+										Kick All
+									</button>
+								</div>
+								<div class="admin-seats-list">
+									{(adminState.value?.seats ?? [0, 1, 2, 3].map((i) => ({ seat: i, occupied: false }))).map((s) => (
+										<div key={s.seat} class="admin-seat-row">
+											<span class="admin-seat-label">
+												Slot {s.seat + 1}:{" "}
+												{s.occupied ? (
+													<span class="seat-badge seat-occupied">Occupied</span>
+												) : (
+													<span class="seat-badge seat-vacant">Vacant</span>
+												)}
+											</span>
+											{s.occupied && (
+												<button
+													type="button"
+													class="btn btn-danger btn-xs"
+													onClick={() => kickSeat(s.seat)}
+												>
+													<UserX size={12} />
+													Kick
+												</button>
+											)}
+										</div>
+									))}
+								</div>
+							</div>
+						)}
+					</section>
 				</aside>
+			)}
+
+			{pinModalOpen.value && (
+				<div class="play-modal-overlay" onClick={cancelPin}>
+					<div class="play-modal-card" onClick={(event) => event.stopPropagation()}>
+						<div class="play-modal-header">
+							<div class="play-modal-title">
+								<Lock size={18} />
+								<h3>Player PIN Required</h3>
+							</div>
+							<button
+								type="button"
+								class="btn btn-icon"
+								aria-label="Close PIN modal"
+								onClick={cancelPin}
+							>
+								<X size={16} />
+							</button>
+						</div>
+						<form onSubmit={submitPin} class="play-modal-form">
+							<p class="play-modal-desc">
+								Enter the player PIN to take gamepad controls on this console.
+							</p>
+							<input
+								type="password"
+								class="play-modal-input"
+								placeholder="Enter PIN..."
+								autoFocus
+								value={pinInput.value}
+								onInput={(event) => pinInput.value = (event.target as HTMLInputElement).value}
+							/>
+							{pinError.value && <p class="play-modal-error">{pinError.value}</p>}
+							<div class="play-modal-actions">
+								<button type="button" class="btn" onClick={cancelPin}>
+									Cancel
+								</button>
+								<button type="submit" class="btn btn-primary">
+									Submit &amp; Play
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
 			)}
 
 			<ul class="play-toasts" aria-live="polite">

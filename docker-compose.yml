@@ -51,6 +51,8 @@ services:
             SWITCH_BT_MAC: ${SWITCH_BT_MAC:-}
             CONTROLLER_BT_MAC: ${CONTROLLER_BT_MAC:-}
             CONTROLLER_BT_PID: ${CONTROLLER_BT_PID:-}
+            PLAYER_PIN: ${PLAYER_PIN:-}
+            ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
 
     client:
         profiles: ["all", "client"]

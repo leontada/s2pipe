@@ -17,6 +17,8 @@ export type StatusData = {
 	capture: CaptureStatus;
 	pico: PicoStatus;
 	playing: number;
+	viewers?: number;
+	pinRequired?: boolean;
 };
 
 export type NodeStatus = {
@@ -24,13 +26,28 @@ export type NodeStatus = {
 	uptimeSec: number;
 } & StatusData;
 
+export type SeatInfo = {
+	seat: number;
+	occupied: boolean;
+};
+
+export type AdminState = {
+	viewers: number;
+	seats: SeatInfo[];
+};
+
 export type ClientMessage =
-	| { op: "play" }
+	| { op: "play"; pin?: string }
 	| { op: "watch" }
 	| { op: "pad"; data: PadState }
-	| { op: "pong" };
+	| { op: "pong" }
+	| { op: "admin_login"; password: string }
+	| { op: "admin_kick"; seat: number }
+	| { op: "admin_kick_all" };
 
 export type ServerMessage =
 	| { op: "status"; data: StatusData }
-	| { op: "play"; data: { playing: boolean } }
-	| { op: "ping" };
+	| { op: "play"; data: { playing: boolean; error?: string } }
+	| { op: "ping" }
+	| { op: "admin_auth"; data: { ok: boolean } }
+	| { op: "admin_state"; data: AdminState };
