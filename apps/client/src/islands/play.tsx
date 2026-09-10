@@ -21,6 +21,7 @@ import {
 	type StreamStats,
 	type WhepHandle,
 } from "../utils/whep.ts";
+import { loadPlayPrefs, savePlayPrefs } from "../utils/prefs.ts";
 
 type Props = {
 	nodeUrl: string;
@@ -84,6 +85,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 	const statsPrev = useRef<{ bytes: number; at: number } | null>(null);
 	const toastSeq = useRef(0);
 	const playRequested = useRef(false);
+	const persistPrefs = useRef(false);
 
 	const playing = useSignal(false);
 	const playingCount = useSignal(0);
@@ -114,6 +116,27 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 	const adminError = useSignal("");
 	const adminState = useSignal<AdminState | null>(null);
 	const inputMuted = useSignal(false);
+
+	useEffect(() => {
+		const prefs = loadPlayPrefs();
+		muted.value = prefs.muted;
+		volume.value = prefs.volume;
+		fill.value = prefs.fill;
+		showStats.value = prefs.showStats;
+	}, []);
+
+	useEffect(() => {
+		if (!persistPrefs.current) {
+			persistPrefs.current = true;
+			return;
+		}
+		savePlayPrefs({
+			muted: muted.value,
+			volume: volume.value,
+			fill: fill.value,
+			showStats: showStats.value,
+		});
+	}, [muted.value, volume.value, fill.value, showStats.value]);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -191,8 +214,13 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 		// deno-lint-ignore no-explicit-any
 		const video = videoRef.current as any;
 		if (!video) return;
-		const onEnd = () => { fullscreen.value = false; };
-		const onBegin = () => { fullscreen.value = true; settings.value = false; };
+		const onEnd = () => {
+			fullscreen.value = false;
+		};
+		const onBegin = () => {
+			fullscreen.value = true;
+			settings.value = false;
+		};
 		video.addEventListener("webkitendfullscreen", onEnd);
 		video.addEventListener("webkitbeginfullscreen", onBegin);
 		return () => {
