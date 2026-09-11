@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, UserX, Volume2, VolumeX, X } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -324,6 +324,12 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 								toast("🎮 Controls resumed by administrator");
 							}
 						}
+					} else if (msg.op === "admin_wake_ack") {
+						if (msg.data.success) {
+							toast("⚡ Wake beacon sent to Nintendo Switch 2!");
+						} else {
+							toast("⚠️ Wake disabled or Pico disconnected.");
+						}
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -529,6 +535,10 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 		if (confirm("Kick all active players to audience?")) {
 			send(wsRef.current, { op: "admin_kick_all" });
 		}
+	}
+
+	function sendAdminWake(): void {
+		send(wsRef.current, { op: "admin_wake" });
 	}
 
 	function toggleSeatMute(seat: number, currentlyMuted: boolean): void {
@@ -859,6 +869,15 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 										Audience: <strong>{adminState.value?.viewers ?? viewersCount.value}</strong>
 									</span>
 									<div class="admin-global-actions">
+										<button
+											type="button"
+											class="btn btn-secondary btn-xs"
+											onClick={sendAdminWake}
+											title="Send BLE wake-up beacon to Nintendo Switch 2"
+										>
+											<Zap size={12} /> Wake Console
+										</button>
+
 										<button
 											type="button"
 											class={`btn btn-xs ${adminState.value?.allMuted ? "btn-warn" : "btn-secondary"}`}

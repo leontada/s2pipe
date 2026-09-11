@@ -9,6 +9,12 @@ function envInt(name: string, fallback: number): number {
 	return Number.isFinite(value) ? value : fallback;
 }
 
+function envBool(name: string, fallback: boolean): boolean {
+	const raw = Deno.env.get(name);
+	if (!raw) return fallback;
+	return raw.trim().toLowerCase() !== "false" && raw.trim() !== "0";
+}
+
 function parseMac(raw: string): Uint8Array | null {
 	const parts = raw.trim().split(/[:\-]/);
 	if (parts.length !== 6) return null;
@@ -35,6 +41,7 @@ export const config = {
 	mediaPort: 8889,
 	captureSource: env("CAPTURE_SOURCE", "test"),
 	picoSerial: env("PICO_SERIAL"),
+	enableBtWake: envBool("ENABLE_BT_WAKE", true),
 	switchBtMac: parseMac(env("SWITCH_BT_MAC")),
 	controllerBtMac: parseMac(env("CONTROLLER_BT_MAC")),
 	controllerBtPid: parsePid(env("CONTROLLER_BT_PID"), 0x2069),

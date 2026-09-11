@@ -1,7 +1,7 @@
 import { Router } from "@webtools/expressapi";
 import { config } from "@/config.ts";
 import { captureStatus } from "@/services/capture.ts";
-import { clearPad, picoStatus, setPad, setWakeHold } from "@/services/pico.ts";
+import { clearPad, picoStatus, setPad, triggerWake } from "@/services/pico.ts";
 import {
 	addViewer,
 	dropViewer,
@@ -79,7 +79,6 @@ setInterval(() => {
 
 function bind(ws: WebSocket): void {
 	addViewer(ws);
-	setWakeHold(viewerCount() > 0);
 	void pushStatus();
 
 	const heartbeat = setInterval(() => {
@@ -116,6 +115,7 @@ function bind(ws: WebSocket): void {
 					});
 					if (existing === undefined && seat !== undefined) {
 						clearPad(seat);
+						triggerWake(false);
 						if (isSeatMuted(seat)) {
 							send(ws, {
 								op: "input_status",
@@ -185,6 +185,12 @@ function bind(ws: WebSocket): void {
 					pushAdminState();
 					return;
 				}
+				case "admin_wake": {
+					if (!adminSockets.has(ws)) return;
+					const success = triggerWake(true);
+					send(ws, { op: "admin_wake_ack", data: { success } });
+					return;
+				}
 				case "admin_mute_all": {
 					if (!adminSockets.has(ws)) return;
 					const activePlayers = setAllMuted(msg.muted);
@@ -208,7 +214,6 @@ function bind(ws: WebSocket): void {
 		clearInterval(heartbeat);
 		adminSockets.delete(ws);
 		const released = dropViewer(ws);
-		setWakeHold(viewerCount() > 0);
 		if (released === undefined) {
 			void pushStatus();
 			return;

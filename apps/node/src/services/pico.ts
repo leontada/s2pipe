@@ -7,7 +7,7 @@ const SERIAL_BAUD = 921600;
 const FLUSH_MS = 8;
 const KEEPALIVE_TICKS = 12;
 const WRITE_TIMEOUT_MS = 250;
-const WAKE_MS = 10_000;
+const WAKE_COOLDOWN_MS = 30_000;
 
 const pads: PadState[] = Array.from({ length: PAD_COUNT }, () => neutralPad());
 
@@ -16,8 +16,7 @@ let picoError: string | null = null;
 let dirty = false;
 let flushing = false;
 let wakeOnce: WakeAddrs | null = null;
-let wakeHold = false;
-let lastWakeMs = 0;
+let lastWakeTriggerMs = 0;
 let ticks = 0;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let retryTimer: ReturnType<typeof setInterval> | null = null;
@@ -41,31 +40,27 @@ export function picoStatus(): PicoStatus {
 		connected: file !== null,
 		path: config.picoSerial || null,
 		error: picoError,
-		wake: Boolean(config.switchBtMac && config.controllerBtMac),
+		wake: Boolean(config.enableBtWake && config.switchBtMac && config.controllerBtMac),
 	};
 }
 
-function queueWake(): void {
-	if (!file || !config.switchBtMac || !config.controllerBtMac) return;
+export function triggerWake(force = false): boolean {
+	if (!config.enableBtWake || !file || !config.switchBtMac || !config.controllerBtMac) {
+		return false;
+	}
+	const now = Date.now();
+	if (!force && now - lastWakeTriggerMs < WAKE_COOLDOWN_MS) {
+		return false;
+	}
 	wakeOnce = {
 		switchMac: config.switchBtMac,
 		padMac: config.controllerBtMac,
 		pid: config.controllerBtPid,
 	};
-	lastWakeMs = Date.now();
+	lastWakeTriggerMs = now;
 	dirty = true;
-}
-
-export function setWakeHold(on: boolean): void {
-	if (on === wakeHold) return;
-	wakeHold = on;
-	if (!on) {
-		wakeOnce = null;
-		lastWakeMs = 0;
-		return;
-	}
-	queueWake();
 	void flush();
+	return true;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -146,7 +141,6 @@ function startFlush(): void {
 			ticks = 0;
 			dirty = true;
 		}
-		if (wakeHold && Date.now() - lastWakeMs >= WAKE_MS) queueWake();
 		void flush();
 	}, FLUSH_MS);
 }
@@ -216,7 +210,6 @@ async function openPico(): Promise<void> {
 		picoError = null;
 		dirty = true;
 		startFlush();
-		if (wakeHold) queueWake();
 		await flush();
 	} catch (error) {
 		picoError = error instanceof Error ? error.message : String(error);
