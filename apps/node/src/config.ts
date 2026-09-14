@@ -47,4 +47,5 @@ export const config = {
 	controllerBtPid: parsePid(env("CONTROLLER_BT_PID"), 0x2069),
 	playerPin: env("PLAYER_PIN", "").trim(),
 	adminPassword: env("ADMIN_PASSWORD", "").trim(),
+	turnstileSecretKey: env("TURNSTILE_SECRET_KEY", "").trim(),
 } as const;

@@ -20,8 +20,9 @@ export default {
 		const host = req.headers.get("host")?.split(":")[0];
 		const fallback = host ? `http://${host}:${port}` : "";
 		const url = nodeUrl(req.cookies.nodeUrl) || fallback;
+		const siteKey = Deno.env.get("TURNSTILE_SITE_KEY") || "";
 		return (
-			<div id="root" data-node-url={url}>
+			<div id="root" data-node-url={url} data-turnstile-site-key={siteKey}>
 				<div id="app"></div>
 			</div>
 		);

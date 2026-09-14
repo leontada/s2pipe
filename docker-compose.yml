@@ -54,6 +54,7 @@ services:
             CONTROLLER_BT_PID: ${CONTROLLER_BT_PID:-}
             PLAYER_PIN: ${PLAYER_PIN:-}
             ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+            TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
 
     client:
         profiles: ["all", "client"]
@@ -67,3 +68,4 @@ services:
             CLIENT_PORT: ${CLIENT_PORT}
             NODE_PORT: ${NODE_PORT}
             NODE_BASE_URL: ${NODE_BASE_URL}
+            TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}

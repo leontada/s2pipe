@@ -42,3 +42,11 @@ export function createClient(baseUrl?: string): NodeClient {
 	if (!url) throw new Error("No node URL found.");
 	return new HttpClient<AppRouter>({ baseUrl: url });
 }
+
+export function turnstileSiteKey(): string {
+	let key = env("TURNSTILE_SITE_KEY");
+	if (!key && typeof document !== "undefined") {
+		key = document.querySelector("#root")?.getAttribute("data-turnstile-site-key") || undefined;
+	}
+	return key || "";
+}

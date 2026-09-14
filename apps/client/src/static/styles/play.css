@@ -897,3 +897,130 @@
 }
 
 
+
+/* Cloudflare Turnstile Gatekeeper */
+.turnstile-gate-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	background: radial-gradient(circle at 50% 30%, #151a24 0%, #080b10 100%);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1.5rem;
+	animation: gateFadeIn 0.3s ease-out;
+}
+
+@keyframes gateFadeIn {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+.turnstile-gate-card {
+	background: rgba(18, 24, 38, 0.85);
+	backdrop-filter: blur(16px);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 180, 216, 0.08);
+	border-radius: 1rem;
+	padding: 2.25rem 2rem;
+	max-width: 420px;
+	width: 100%;
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1.5rem;
+}
+
+.turnstile-brand {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	margin-bottom: 0.25rem;
+}
+
+.turnstile-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+}
+
+.turnstile-dot.red {
+	background: #ff3c4a;
+	box-shadow: 0 0 10px rgba(255, 60, 74, 0.5);
+}
+
+.turnstile-dot.blue {
+	background: #00b4d8;
+	box-shadow: 0 0 10px rgba(0, 180, 216, 0.5);
+}
+
+.turnstile-title {
+	font-size: 1.75rem;
+	font-weight: 800;
+	letter-spacing: -0.03em;
+	color: #ffffff;
+	margin: 0;
+}
+
+.turnstile-subtitle {
+	font-size: 0.875rem;
+	color: rgba(255, 255, 255, 0.55);
+	margin: 0;
+}
+
+.turnstile-gate-body {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1.25rem;
+}
+
+.turnstile-status {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	color: rgba(255, 255, 255, 0.75);
+	font-size: 0.875rem;
+}
+
+.turnstile-spinner {
+	width: 18px;
+	height: 18px;
+	border: 2px solid rgba(255, 255, 255, 0.15);
+	border-top-color: #00b4d8;
+	border-radius: 50%;
+	animation: turnstileSpin 0.8s linear infinite;
+}
+
+@keyframes turnstileSpin {
+	to { transform: rotate(360deg); }
+}
+
+#cf-turnstile-container {
+	min-height: 65px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.turnstile-fallback {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 1rem;
+	margin-top: 0.5rem;
+}
+
+.turnstile-warn {
+	font-size: 0.8125rem;
+	color: #fbbf24;
+	line-height: 1.4;
+	background: rgba(245, 158, 11, 0.1);
+	border: 1px solid rgba(245, 158, 11, 0.25);
+	border-radius: 0.5rem;
+	padding: 0.75rem;
+	margin: 0;
+}

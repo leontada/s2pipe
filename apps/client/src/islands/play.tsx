@@ -22,11 +22,22 @@ import {
 	type WhepHandle,
 } from "../utils/whep.ts";
 import { loadPlayPrefs, savePlayPrefs } from "../utils/prefs.ts";
+import { turnstileSiteKey as getTurnstileSiteKey } from "../client.ts";
 
 type Props = {
 	nodeUrl: string;
 	nodeLocked: boolean;
+	turnstileSiteKey?: string;
 };
+
+function isTurnstileCleared(siteKey?: string): boolean {
+	if (!siteKey) return true;
+	try {
+		return sessionStorage.getItem("s2pipe_turnstile_cleared") === "true";
+	} catch {
+		return false;
+	}
+}
 
 type Toast = { id: number; text: string };
 
@@ -75,7 +86,11 @@ function streamBanner(
 	return null;
 }
 
-export default function Play({ nodeUrl, nodeLocked }: Props) {
+export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
+	const effectiveSiteKey = turnstileSiteKey || getTurnstileSiteKey() || "0x4AAAAAAEwg5V8LpgJXde_q";
+	const turnstilePassed = useSignal(false);
+	const turnstileBlocked = useSignal(false);
+	const turnstileContainerRef = useRef<HTMLDivElement>(null);
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const stageRef = useRef<HTMLElement>(null);
 	const whepRef = useRef<WhepHandle | null>(null);
@@ -146,8 +161,98 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 		}, 4200);
 	}
 
+	// Cloudflare Turnstile Gatekeeper com Resiliência Anti-Bloqueador
+	useEffect(() => {
+		if (!effectiveSiteKey || isTurnstileCleared(effectiveSiteKey)) {
+			turnstilePassed.value = true;
+			return;
+		}
+		if (turnstilePassed.value) return;
+
+		let widgetId: string | null = null;
+		let unmounted = false;
+
+		// Timer de segurança (3.5s): se um AdBlock/Brave Shields impedir o Turnstile de carregar, oferece o fallback
+		const safetyTimer = globalThis.setTimeout(() => {
+			if (!turnstilePassed.value) {
+				turnstileBlocked.value = true;
+			}
+		}, 3500);
+
+		let isRendering = false;
+		function renderWidget() {
+			if (unmounted || !turnstileContainerRef.current) return;
+			if (widgetId || isRendering || turnstileContainerRef.current.childElementCount > 0) return;
+			isRendering = true;
+			const cf = (globalThis as unknown as { turnstile?: {
+				render: (el: HTMLElement, opt: Record<string, unknown>) => string;
+				remove: (id: string) => void;
+			} }).turnstile;
+			if (!cf) {
+				turnstileBlocked.value = true;
+				return;
+			}
+
+			try {
+				widgetId = cf.render(turnstileContainerRef.current, {
+					sitekey: effectiveSiteKey,
+					theme: "dark",
+					callback: (token: string) => {
+						clearTimeout(safetyTimer);
+						try {
+							sessionStorage.setItem("s2pipe_turnstile_cleared", "true");
+							sessionStorage.setItem("s2pipe_turnstile_token", token);
+						} catch {}
+						turnstilePassed.value = true;
+					},
+					"error-callback": () => {
+						clearTimeout(safetyTimer);
+						turnstileBlocked.value = true;
+					},
+				});
+			} catch {
+				turnstileBlocked.value = true;
+			}
+		}
+
+		const cf = (globalThis as unknown as { turnstile?: unknown }).turnstile;
+		if (cf) {
+			renderWidget();
+		} else {
+			(globalThis as unknown as { onTurnstileLoaded?: () => void }).onTurnstileLoaded = () => {
+				renderWidget();
+			};
+			let script = document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]') as HTMLScriptElement | null;
+			if (!script) {
+				script = document.createElement("script");
+				script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoaded";
+				script.async = true;
+				script.onerror = () => {
+					clearTimeout(safetyTimer);
+					turnstileBlocked.value = true;
+				};
+				script.onload = () => {
+					renderWidget();
+				};
+				document.head.appendChild(script);
+			} else {
+				script.addEventListener("load", () => renderWidget());
+			}
+		}
+
+		return () => {
+			unmounted = true;
+			clearTimeout(safetyTimer);
+			if (widgetId) {
+				const activeCf = (globalThis as unknown as { turnstile?: { remove: (id: string) => void } }).turnstile;
+				try { activeCf?.remove(widgetId); } catch {}
+			}
+		};
+	}, [turnstilePassed.value, effectiveSiteKey]);
+
 	// Gestion de la connexion WHeP (Vidéo + Audio)
 	useEffect(() => {
+		if (!turnstilePassed.value) return;
 		const video = videoRef.current;
 		if (!video) return;
 		let cancelled = false;
@@ -231,6 +336,7 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 
 	// Gestion WebSocket (Statut et Commandes)
 	useEffect(() => {
+		if (!turnstilePassed.value) return;
 		let socket: WebSocket | null = null;
 		let retryTimer = 0;
 		let isClosed = false;
@@ -599,6 +705,49 @@ export default function Play({ nodeUrl, nodeLocked }: Props) {
 				toggleFullscreen();
 			}}
 		>
+			{!turnstilePassed.value && (
+				<div class="turnstile-gate-overlay">
+					<div class="turnstile-gate-card">
+						<div class="turnstile-gate-header">
+							<div class="turnstile-brand">
+								<span class="turnstile-dot red"></span>
+								<span class="turnstile-dot blue"></span>
+								<h2 class="turnstile-title">s2pipe</h2>
+							</div>
+							<p class="turnstile-subtitle">Nintendo Switch Remote Play</p>
+						</div>
+						<div class="turnstile-gate-body">
+							{turnstileBlocked.value ? (
+								<div class="turnstile-fallback">
+									<p class="turnstile-warn">
+										⚠️ Verificação bloqueada ou demorando. Se estiver usando AdBlock ou Brave Shields, desative para este site ou clique abaixo:
+									</p>
+									<button
+										type="button"
+										class="btn btn-primary btn-sm"
+										onClick={() => {
+											try {
+												sessionStorage.setItem("s2pipe_turnstile_cleared", "true");
+											} catch {}
+											turnstilePassed.value = true;
+										}}
+									>
+										Continuar para o Console
+									</button>
+								</div>
+							) : (
+								<>
+									<div class="turnstile-status">
+										<div class="turnstile-spinner"></div>
+										<span>Verificando conexão segura...</span>
+									</div>
+									<div id="cf-turnstile-container" ref={turnstileContainerRef}></div>
+								</>
+							)}
+						</div>
+					</div>
+				</div>
+			)}
 			<video
 				ref={videoRef}
 				autoplay

@@ -32,10 +32,12 @@ export default {
 	body: (req) => {
 		const fallback = resolveFallback(req);
 		const url = nodeUrl(req.cookies.nodeUrl) || fallback;
+		const turnstileSiteKey = Deno.env.get("TURNSTILE_SITE_KEY") || "";
 		return (
 			<Play
 				nodeUrl={url!}
 				nodeLocked={nodeUrlLocked()}
+				turnstileSiteKey={turnstileSiteKey}
 			/>
 		);
 	},
