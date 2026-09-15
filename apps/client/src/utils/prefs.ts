@@ -5,6 +5,8 @@ export type PlayPrefs = {
 	muted: boolean;
 	fill: boolean;
 	showStats: boolean;
+	touchEnabled?: boolean;
+	touchOpacity?: number;
 };
 
 const defaults: PlayPrefs = {
@@ -12,6 +14,8 @@ const defaults: PlayPrefs = {
 	muted: false,
 	fill: false,
 	showStats: false,
+	touchEnabled: undefined,
+	touchOpacity: 0.7,
 };
 
 function storage(): Storage | null {
@@ -39,6 +43,8 @@ export function loadPlayPrefs(): PlayPrefs {
 			muted: Boolean(parsed.muted),
 			fill: Boolean(parsed.fill),
 			showStats: Boolean(parsed.showStats),
+			touchEnabled: typeof parsed.touchEnabled === "boolean" ? parsed.touchEnabled : undefined,
+			touchOpacity: typeof parsed.touchOpacity === "number" ? Math.min(1, Math.max(0.2, parsed.touchOpacity)) : 0.7,
 		};
 	} catch {
 		return { ...defaults };
@@ -54,6 +60,8 @@ export function savePlayPrefs(prefs: PlayPrefs): void {
 				muted: Boolean(prefs.muted),
 				fill: Boolean(prefs.fill),
 				showStats: Boolean(prefs.showStats),
+				touchEnabled: prefs.touchEnabled,
+				touchOpacity: prefs.touchOpacity,
 			}),
 		);
 	} catch {

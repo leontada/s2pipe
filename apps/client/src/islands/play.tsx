@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -9,9 +9,11 @@ import {
 	createInputTracker,
 	type GamepadOption,
 	type InputSource,
+	isTouchDevice,
 	KEYBOARD_HELP,
 	listGamepads,
 } from "../utils/input.ts";
+import TouchGamepad from "../components/touch-gamepad.tsx";
 import {
 	type AudioWhepHandle,
 	onWhepDead,
@@ -118,6 +120,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const fullscreen = useSignal(false);
 	const live = useSignal(false);
 	const toasts = useSignal<Toast[]>([]);
+	const touchEnabled = useSignal(false);
+	const touchOpacity = useSignal(0.7);
+	const isPortrait = useSignal(false);
 
 	// Access Control & Admin signals
 	const pinRequired = useSignal(false);
@@ -138,6 +143,26 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		volume.value = prefs.volume;
 		fill.value = prefs.fill;
 		showStats.value = prefs.showStats;
+		if (typeof prefs.touchOpacity === "number") {
+			touchOpacity.value = prefs.touchOpacity;
+		}
+		const hasTouch = isTouchDevice();
+		if (typeof prefs.touchEnabled === "boolean") {
+			touchEnabled.value = prefs.touchEnabled;
+		} else if (hasTouch) {
+			touchEnabled.value = true;
+		}
+
+		const checkOrientation = () => {
+			isPortrait.value = window.innerHeight > window.innerWidth;
+		};
+		checkOrientation();
+		window.addEventListener("resize", checkOrientation);
+		window.addEventListener("orientationchange", checkOrientation);
+		return () => {
+			window.removeEventListener("resize", checkOrientation);
+			window.removeEventListener("orientationchange", checkOrientation);
+		};
 	}, []);
 
 	useEffect(() => {
@@ -150,8 +175,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			volume: volume.value,
 			fill: fill.value,
 			showStats: showStats.value,
+			touchEnabled: touchEnabled.value,
+			touchOpacity: touchOpacity.value,
 		});
-	}, [muted.value, volume.value, fill.value, showStats.value]);
+	}, [muted.value, volume.value, fill.value, showStats.value, touchEnabled.value, touchOpacity.value]);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -477,8 +504,13 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			const next = listGamepads();
 			pads.value = next;
 			const current = source.value;
+			if (current?.kind === "touch") return;
 			if (!current || !next.some((pad) => pad.index === current.index)) {
-				source.value = firstPad(next);
+				if (next.length > 0) {
+					source.value = firstPad(next);
+				} else if (touchEnabled.value || isTouchDevice()) {
+					source.value = { kind: "touch" };
+				}
 			}
 		};
 
@@ -699,6 +731,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			ref={stageRef}
 			data-fill={fill.value ? "true" : undefined}
 			data-idle={hideHud ? "true" : undefined}
+			data-touch={touchEnabled.value ? "true" : undefined}
+			data-portrait={isPortrait.value ? "true" : undefined}
 			onClick={onStageClick}
 			onDblClick={(event) => {
 				event.preventDefault();
@@ -851,14 +885,21 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					<label class="play-controller">
 						<select
 							aria-label="Controller"
-							value={source.value ? String(source.value.index) : ""}
+							value={source.value?.kind === "touch" ? "touch" : source.value ? String(source.value.index) : ""}
 							onChange={(e) => {
-								const val = Number((e.target as HTMLSelectElement).value);
-								if (Number.isFinite(val)) source.value = { kind: "gamepad", index: val };
+								const val = (e.target as HTMLSelectElement).value;
+								if (val === "touch") {
+									source.value = { kind: "touch" };
+									touchEnabled.value = true;
+								} else {
+									const idx = Number(val);
+									if (Number.isFinite(idx)) source.value = { kind: "gamepad", index: idx };
+								}
 							}}
 						>
-							{pads.value.length === 0 && <option value="" disabled>Connect a gamepad</option>}
+							<option value="touch">📱 Controle Touch na Tela</option>
 							{pads.value.map((pad) => <option value={String(pad.index)}>{pad.id}</option>)}
+							{pads.value.length === 0 && !source.value && <option value="" disabled>No physical gamepad</option>}
 						</select>
 						{connected.value && !playing.value && (
 							<span class="play-hint">Click Play, then use a gamepad.</span>
@@ -868,6 +909,24 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						)}
 					</label>
 					<div class="play-tools">
+						<button
+							type="button"
+							class="btn btn-icon"
+							aria-label="Touch Controls"
+							title={touchEnabled.value ? "Ocultar Controles na Tela" : "Exibir Controles na Tela"}
+							data-active={touchEnabled.value ? "true" : undefined}
+							onClick={() => {
+								touchEnabled.value = !touchEnabled.value;
+								if (touchEnabled.value) {
+									source.value = { kind: "touch" };
+									toast("Controles na tela ativados");
+								} else {
+									toast("Controles na tela ocultos");
+								}
+							}}
+						>
+							<Smartphone size={16} />
+						</button>
 						<button
 							type="button"
 							class="btn btn-icon"
@@ -905,6 +964,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					</div>
 				</div>
 			</div>
+
+			<TouchGamepad
+				visible={touchEnabled.value && (playing.value || pads.value.length === 0)}
+				opacity={touchOpacity.value}
+			/>
 
 			{settings.value && (
 				<aside class="play-settings" onClick={(event) => event.stopPropagation()}>
@@ -960,6 +1024,31 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						/>
 						Overlay WebRTC stats
 					</label>
+
+					<label class="play-check">
+						<input
+							type="checkbox"
+							checked={touchEnabled.value}
+							onChange={(event) => {
+								touchEnabled.value = (event.target as HTMLInputElement).checked;
+								if (touchEnabled.value) source.value = { kind: "touch" };
+							}}
+						/>
+						Controles na Tela (Touch Gamepad)
+					</label>
+					{touchEnabled.value && (
+						<label class="field">
+							<span>Opacidade do Controle ({Math.round(touchOpacity.value * 100)}%)</span>
+							<input
+								type="range"
+								min="0.2"
+								max="1"
+								step="0.05"
+								value={touchOpacity.value}
+								onInput={(event) => touchOpacity.value = Number((event.target as HTMLInputElement).value)}
+							/>
+						</label>
+					)}
 
 					<section class="play-help">
 						<h3>Gamepad</h3>

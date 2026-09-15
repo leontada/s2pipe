@@ -1,9 +1,23 @@
 import { clampAxis, neutralPad, PAD_CENTER, PadButton, type PadState } from "@s2pipe/shared/types/pad";
 
-export type InputSource = {
-	kind: "gamepad";
-	index: number;
-};
+export type InputSource =
+	| { kind: "gamepad"; index: number }
+	| { kind: "touch" };
+
+let globalTouchState: PadState = neutralPad();
+
+export function setTouchState(state: PadState): void {
+	globalTouchState = state;
+}
+
+export function getTouchState(): PadState {
+	return globalTouchState;
+}
+
+export function isTouchDevice(): boolean {
+	if (typeof window === "undefined") return false;
+	return Boolean("ontouchstart" in window || (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0));
+}
 
 export type GamepadOption = {
 	index: number;
@@ -196,7 +210,9 @@ export function createInputTracker() {
 		},
 
 		sample(source: InputSource): PadState {
-			const pad = sampleGamepad(source.index) ?? neutralPad();
+			const pad = source.kind === "touch"
+				? getTouchState()
+				: (sampleGamepad(source.index) ?? neutralPad());
 
 			let extraButtons = 0;
 

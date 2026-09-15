@@ -1024,3 +1024,413 @@
 	padding: 0.75rem;
 	margin: 0;
 }
+
+/* ==========================================================================
+   Mobile Touch Gamepad Overlay (Joy-Con Inspired)
+   ========================================================================== */
+
+.touch-gamepad {
+	position: absolute;
+	inset: 0;
+	z-index: 10;
+	pointer-events: none;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	padding: calc(var(--space-2) + env(safe-area-inset-top, 0px))
+	         calc(var(--space-4) + env(safe-area-inset-right, 0px))
+	         calc(var(--space-4) + env(safe-area-inset-bottom, 0px))
+	         calc(var(--space-4) + env(safe-area-inset-left, 0px));
+	opacity: var(--touch-opacity, 0.7);
+	transition: opacity 0.2s ease;
+	user-select: none;
+	-webkit-user-select: none;
+	touch-action: none;
+}
+
+/* Modo Retrato (Portrait): Tela Dividida estilo Console Portátil */
+#play[data-portrait="true"] {
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-start;
+	align-items: stretch;
+	background: #06080d;
+}
+
+#play[data-portrait="true"] > video {
+	width: 100%;
+	height: auto;
+	aspect-ratio: 16 / 9;
+	flex: 0 0 auto;
+	object-fit: contain;
+}
+
+#play[data-portrait="true"] .touch-gamepad {
+	position: relative;
+	flex: 1 1 auto;
+	width: 100%;
+	height: auto;
+	min-height: 340px;
+	background: radial-gradient(circle at 50% 30%, #151a24 0%, #090c12 100%);
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	box-shadow: inset 0 8px 24px rgba(0, 0, 0, 0.6);
+	pointer-events: auto;
+	opacity: 1;
+	padding: var(--space-3) var(--space-4);
+}
+
+#play[data-portrait="true"] .play-hud {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: auto;
+	padding: var(--space-2) var(--space-3);
+	background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent);
+}
+
+#play[data-portrait="true"] .touch-main-row {
+	flex: 1;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--space-2) var(--space-2);
+	margin-bottom: var(--space-3);
+}
+
+#play[data-portrait="true"] .touch-side-left,
+#play[data-portrait="true"] .touch-side-right {
+	flex-direction: column;
+	align-items: center;
+	gap: 1.25rem;
+}
+
+/* Linha Superior dos Gatilhos */
+.touch-shoulder-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	width: 100%;
+	pointer-events: none;
+}
+
+.touch-triggers-left,
+.touch-triggers-right {
+	display: flex;
+	gap: 0.5rem;
+	pointer-events: auto;
+}
+
+.touch-system-center {
+	display: flex;
+	gap: 0.6rem;
+	align-items: center;
+	pointer-events: auto;
+}
+
+/* Botões Genéricos de Toque */
+.touch-btn {
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.1);
+	backdrop-filter: blur(8px);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	color: #ffffff;
+	font-weight: 700;
+	font-family: var(--font-sans);
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	cursor: pointer;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+	transition: transform 0.05s ease, background 0.05s ease, box-shadow 0.05s ease;
+}
+
+.touch-btn:active {
+	transform: scale(0.92);
+	background: rgba(255, 255, 255, 0.28);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* Gatilhos L, ZL, R, ZR */
+.touch-btn-zl,
+.touch-btn-zr,
+.touch-btn-l,
+.touch-btn-r {
+	border-radius: 9999px;
+	height: 2.3rem;
+	padding: 0 1.1rem;
+	font-size: 0.85rem;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+}
+
+.touch-btn-zl,
+.touch-btn-l {
+	border-color: rgba(0, 180, 216, 0.4);
+	background: rgba(0, 180, 216, 0.12);
+	color: #90e0ef;
+}
+
+.touch-btn-zl:active,
+.touch-btn-l:active {
+	background: rgba(0, 180, 216, 0.35);
+	box-shadow: 0 0 15px rgba(0, 180, 216, 0.5);
+}
+
+.touch-btn-zr,
+.touch-btn-r {
+	border-color: rgba(255, 60, 74, 0.4);
+	background: rgba(255, 60, 74, 0.12);
+	color: #ff858d;
+}
+
+.touch-btn-zr:active,
+.touch-btn-r:active {
+	background: rgba(255, 60, 74, 0.35);
+	box-shadow: 0 0 15px rgba(255, 60, 74, 0.5);
+}
+
+/* Botões de Sistema (-, +, Home, Capture) */
+.touch-btn-sys,
+.touch-btn-home,
+.touch-btn-capture {
+	width: 2.2rem;
+	height: 2.2rem;
+	font-size: 0.95rem;
+	border-color: rgba(255, 255, 255, 0.15);
+	background: rgba(20, 25, 35, 0.7);
+}
+
+.touch-btn-home {
+	font-size: 0.85rem;
+	border-color: rgba(0, 180, 216, 0.3);
+}
+
+.touch-btn-capture {
+	font-size: 1rem;
+	border-radius: 6px;
+	width: 2rem;
+	height: 2rem;
+}
+
+/* Linha Principal (Lado Esquerdo e Direito) */
+.touch-main-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	width: 100%;
+	pointer-events: none;
+	margin-bottom: var(--space-2);
+}
+
+.touch-side {
+	display: flex;
+	align-items: center;
+	gap: 1.5rem;
+	pointer-events: auto;
+}
+
+.touch-side-left {
+	flex-direction: row;
+}
+
+.touch-side-right {
+	flex-direction: row-reverse;
+}
+
+/* Analógico Virtual (Joystick) */
+.touch-stick-base {
+	width: 120px;
+	height: 120px;
+	border-radius: 50%;
+	background: radial-gradient(circle, rgba(15, 20, 30, 0.5) 0%, rgba(5, 8, 15, 0.75) 100%);
+	border: 2px solid rgba(0, 180, 216, 0.35);
+	box-shadow: 0 0 20px rgba(0, 180, 216, 0.15), inset 0 0 15px rgba(0, 0, 0, 0.8);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	touch-action: none;
+	cursor: pointer;
+}
+
+.touch-rstick {
+	border-color: rgba(255, 60, 74, 0.35);
+	box-shadow: 0 0 20px rgba(255, 60, 74, 0.15), inset 0 0 15px rgba(0, 0, 0, 0.8);
+	width: 105px;
+	height: 105px;
+}
+
+.touch-stick-knob {
+	width: 52px;
+	height: 52px;
+	border-radius: 50%;
+	background: radial-gradient(circle at 35% 35%, #2a3447 0%, #121824 100%);
+	border: 2px solid rgba(255, 255, 255, 0.3);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6), inset 0 2px 4px rgba(255, 255, 255, 0.2);
+	position: absolute;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+	will-change: transform;
+}
+
+.touch-stick-click {
+	width: 100%;
+	height: 100%;
+	border: none;
+	background: transparent;
+	color: rgba(255, 255, 255, 0.4);
+	font-size: 0.65rem;
+	font-weight: 800;
+	pointer-events: auto;
+	cursor: pointer;
+}
+
+/* D-Pad (Direcionais em Cruz) */
+.touch-dpad {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.touch-dpad-middle {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.touch-dpad .touch-btn {
+	width: 42px;
+	height: 42px;
+	border-radius: 8px;
+	background: rgba(18, 24, 35, 0.7);
+	border: 1px solid rgba(0, 180, 216, 0.3);
+	color: #00b4d8;
+	font-size: 0.85rem;
+}
+
+.touch-dpad .touch-btn:active {
+	background: rgba(0, 180, 216, 0.3);
+	box-shadow: 0 0 12px rgba(0, 180, 216, 0.4);
+}
+
+.touch-dpad-center {
+	width: 32px;
+	height: 32px;
+	background: rgba(10, 14, 22, 0.8);
+	border-radius: 4px;
+}
+
+/* Cluster ABXY (Padrão Diamante Nintendo) */
+.touch-abxy-cluster {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.touch-abxy-middle {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.touch-abxy-spacer {
+	width: 32px;
+	height: 32px;
+}
+
+.touch-abxy-cluster .touch-btn {
+	width: 50px;
+	height: 50px;
+	font-size: 1.15rem;
+	font-weight: 800;
+}
+
+.touch-btn-a {
+	border-color: rgba(255, 60, 74, 0.5);
+	background: rgba(255, 60, 74, 0.15);
+	color: #ff3c4a;
+	box-shadow: 0 0 12px rgba(255, 60, 74, 0.25);
+}
+
+.touch-btn-a:active {
+	background: rgba(255, 60, 74, 0.45);
+	box-shadow: 0 0 20px rgba(255, 60, 74, 0.6);
+}
+
+.touch-btn-b {
+	border-color: rgba(245, 158, 11, 0.5);
+	background: rgba(245, 158, 11, 0.15);
+	color: #fbbf24;
+}
+
+.touch-btn-b:active {
+	background: rgba(245, 158, 11, 0.45);
+	box-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+}
+
+.touch-btn-x {
+	border-color: rgba(0, 180, 216, 0.5);
+	background: rgba(0, 180, 216, 0.15);
+	color: #00b4d8;
+}
+
+.touch-btn-x:active {
+	background: rgba(0, 180, 216, 0.45);
+	box-shadow: 0 0 20px rgba(0, 180, 216, 0.6);
+}
+
+.touch-btn-y {
+	border-color: rgba(16, 185, 129, 0.5);
+	background: rgba(16, 185, 129, 0.15);
+	color: #34d399;
+}
+
+.touch-btn-y:active {
+	background: rgba(16, 185, 129, 0.45);
+	box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+}
+
+/* Responsividade Compacta para Telas Menores */
+@media (max-height: 500px) {
+	.touch-gamepad {
+		padding: calc(var(--space-1) + env(safe-area-inset-top, 0px))
+		         calc(var(--space-6) + env(safe-area-inset-right, 0px))
+		         calc(var(--space-6) + env(safe-area-inset-bottom, 0px))
+		         calc(var(--space-6) + env(safe-area-inset-left, 0px));
+	}
+	.touch-system-center {
+		margin-top: 3.2rem;
+	}
+	.touch-stick-base {
+		width: 95px;
+		height: 95px;
+	}
+	.touch-rstick {
+		width: 85px;
+		height: 85px;
+	}
+	.touch-stick-knob {
+		width: 42px;
+		height: 42px;
+	}
+	.touch-abxy-cluster .touch-btn {
+		width: 42px;
+		height: 42px;
+		font-size: 1rem;
+	}
+	.touch-dpad .touch-btn {
+		width: 36px;
+		height: 36px;
+	}
+	.touch-shoulder-row {
+		margin-bottom: -0.25rem;
+	}
+}
