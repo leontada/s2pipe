@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Home, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -492,9 +492,15 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						}
 					} else if (msg.op === "admin_wake_ack") {
 						if (msg.data.success) {
-							toast("⚡ Wake beacon sent to Nintendo Switch 2!");
+							toast("⚡ Wake beacon sent to Nintendo Switch!");
 						} else {
-							toast("⚠️ Wake disabled or Pico disconnected.");
+							toast("⚠️ Wake cooldown active or Pico disconnected.");
+						}
+					} else if (msg.op === "admin_home_ack") {
+						if (msg.data.success) {
+							toast("🏠 Home button sent to console!");
+						} else {
+							toast("⚠️ Failed to send Home (Pico disconnected).");
 						}
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
@@ -788,6 +794,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	function sendAdminWake(): void {
 		send(wsRef.current, { op: "admin_wake" });
+	}
+
+	function sendAdminHome(): void {
+		send(wsRef.current, { op: "admin_home" });
 	}
 
 	function toggleSeatMute(seat: number, currentlyMuted: boolean): void {
@@ -1283,9 +1293,18 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 											type="button"
 											class="btn btn-secondary btn-xs"
 											onClick={sendAdminWake}
-											title="Send BLE wake-up beacon to Nintendo Switch 2"
+											title="Send BLE wake-up beacon to Nintendo Switch"
 										>
 											<Zap size={12} /> Wake Console
+										</button>
+
+										<button
+											type="button"
+											class="btn btn-secondary btn-xs"
+											onClick={sendAdminHome}
+											title="Press Home button on Nintendo Switch"
+										>
+											<Home size={12} /> Home
 										</button>
 
 										<button

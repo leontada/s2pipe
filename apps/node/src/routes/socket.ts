@@ -1,7 +1,7 @@
 import { Router } from "@webtools/expressapi";
 import { config } from "@/config.ts";
 import { captureStatus } from "@/services/capture.ts";
-import { clearPad, picoStatus, setPad, triggerWake } from "@/services/pico.ts";
+import { clearPad, picoStatus, setPad, triggerHome, triggerWake } from "@/services/pico.ts";
 import {
 	addViewer,
 	dropViewer,
@@ -22,6 +22,7 @@ import {
 	viewerCount,
 	watchPads,
 } from "@/services/sockets.ts";
+import { PadButton } from "@s2pipe/shared/types/pad";
 import type { ClientMessage, ServerMessage } from "@s2pipe/shared/types/node";
 
 const HEARTBEAT_INTERVAL = 30_000;
@@ -151,7 +152,10 @@ function bind(ws: WebSocket): void {
 				case "pad": {
 					const seat = typeof msg.seat === "number" ? msg.seat : padOf(ws);
 					if (seat !== undefined && ownsSeat(ws, seat) && !isSeatMuted(seat)) {
-						setPad(seat, msg.data);
+						setPad(seat, {
+							...msg.data,
+							buttons: msg.data.buttons & ~(PadButton.Home | PadButton.Capture),
+						});
 					}
 					return;
 				}
@@ -206,6 +210,12 @@ function bind(ws: WebSocket): void {
 					if (!adminSockets.has(ws)) return;
 					const success = triggerWake(true);
 					send(ws, { op: "admin_wake_ack", data: { success } });
+					return;
+				}
+				case "admin_home": {
+					if (!adminSockets.has(ws)) return;
+					const success = triggerHome();
+					send(ws, { op: "admin_home_ack", data: { success } });
 					return;
 				}
 				case "admin_mute_all": {

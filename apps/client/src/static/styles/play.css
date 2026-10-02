@@ -956,6 +956,7 @@
 .admin-global-actions,
 .admin-seat-actions {
 	display: flex;
+	flex-wrap: wrap;
 	gap: var(--space-1);
 	align-items: center;
 }

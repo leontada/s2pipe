@@ -49,7 +49,8 @@ export type ClientMessage =
 	| { op: "admin_kick_all" }
 	| { op: "admin_mute_seat"; seat: number; muted: boolean }
 	| { op: "admin_mute_all"; muted: boolean }
-	| { op: "admin_wake" };
+	| { op: "admin_wake" }
+	| { op: "admin_home" };
 
 export type ServerMessage =
 	| { op: "status"; data: StatusData }
@@ -58,4 +59,5 @@ export type ServerMessage =
 	| { op: "admin_auth"; data: { ok: boolean } }
 	| { op: "admin_state"; data: AdminState }
 	| { op: "input_status"; data: { muted: boolean; reason?: string } }
-	| { op: "admin_wake_ack"; data: { success: boolean; reason?: string } };
+	| { op: "admin_wake_ack"; data: { success: boolean; reason?: string } }
+	| { op: "admin_home_ack"; data: { success: boolean; reason?: string } };

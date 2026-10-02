@@ -1,6 +1,6 @@
 import { config } from "@/config.ts";
 import { encodePacket, type WakeAddrs } from "@/utils/packet.ts";
-import { neutralPad, PAD_COUNT, type PadState, samePad, sanitizePad } from "@s2pipe/shared/types/pad";
+import { neutralPad, PAD_COUNT, PadButton, type PadState, samePad, sanitizePad } from "@s2pipe/shared/types/pad";
 import type { PicoStatus } from "@s2pipe/shared/types/node";
 
 const SERIAL_BAUD = 921600;
@@ -17,9 +17,22 @@ let dirty = false;
 let flushing = false;
 let wakeOnce: WakeAddrs | null = null;
 let lastWakeTriggerMs = 0;
+let homePulseUntil = 0;
 let ticks = 0;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let retryTimer: ReturnType<typeof setInterval> | null = null;
+
+export function triggerHome(): boolean {
+	if (!file) return false;
+	homePulseUntil = Date.now() + 150;
+	dirty = true;
+	void flush();
+	setTimeout(() => {
+		dirty = true;
+		void flush();
+	}, 170);
+	return true;
+}
 
 export function setPad(index: number, state: PadState): void {
 	const next = sanitizePad(state);
@@ -96,9 +109,15 @@ async function flush(): Promise<void> {
 			dirty = false;
 			const wake = wakeOnce;
 			wakeOnce = null;
+			let outgoingPads = pads;
+			if (Date.now() < homePulseUntil) {
+				outgoingPads = pads.map((p, i) =>
+					i === 0 ? { ...p, buttons: p.buttons | PadButton.Home } : p
+				);
+			}
 			try {
 				await withTimeout(
-					writeAll(file, encodePacket(pads, wake)),
+					writeAll(file, encodePacket(outgoingPads, wake)),
 					WRITE_TIMEOUT_MS,
 					"serial write timeout",
 				);

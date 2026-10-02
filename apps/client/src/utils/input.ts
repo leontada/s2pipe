@@ -80,10 +80,7 @@ const STANDARD_BUTTONS: readonly number[] = [
 	PadButton.Right,
 ];
 
-const KEY_BUTTONS: Record<string, number> = {
-	KeyH: PadButton.Home,
-	KeyG: PadButton.Capture,
-};
+const KEY_BUTTONS: Record<string, number> = {};
 
 function axisToByte(value: number): number {
 	if (!Number.isFinite(value) || Math.abs(value) < DEADZONE) {
@@ -127,26 +124,10 @@ function sampleGamepad(index: number): PadState | null {
 	}
 
 	/*
-	 * Home / Guide and Capture / Share are optional in the Gamepad API.
-	 * When the browser exposes them, these are the common indices.
+	 * Home and Capture are blocked for player safety to avoid minimizing games
+	 * or filling console album storage. Home is available in Admin panel.
 	 */
-	if (buttonDown(pad.buttons[16])) {
-		buttons |= PadButton.Home;
-	}
-
-	if (buttonDown(pad.buttons[17])) {
-		buttons |= PadButton.Capture;
-	}
-
-	/*
-	 * Fallback for Switch controllers: Minus + Plus together acts as Home.
-	 */
-	if (
-		(buttons & PadButton.Minus) !== 0 &&
-		(buttons & PadButton.Plus) !== 0
-	) {
-		buttons |= PadButton.Home;
-	}
+	buttons &= ~(PadButton.Home | PadButton.Capture);
 
 	return fromAxes(
 		pad.axes[0] ?? 0,
@@ -246,8 +227,5 @@ export function createInputTracker() {
 }
 
 export const KEYBOARD_HELP = [
-	["H / G", "Home / Capture"],
-	["Home / PS / Guide", "Home"],
-	["+ and -", "Home"],
 	["Esc", "Settings"],
 ] as const;
