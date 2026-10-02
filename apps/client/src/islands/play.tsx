@@ -340,7 +340,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			clearTimeout(retryTimer);
 			cleanupWhep();
 		};
-	}, [nodeUrl]);
+	}, [nodeUrl, turnstilePassed.value]);
 
 	useEffect(() => {
 		// deno-lint-ignore no-explicit-any
@@ -492,7 +492,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			socket?.close();
 			wsRef.current = null;
 		};
-	}, [nodeUrl]);
+	}, [nodeUrl, turnstilePassed.value]);
 
 	// Gestion des manettes (Gamepads)
 	useEffect(() => {

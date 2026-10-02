@@ -1101,7 +1101,7 @@
 #play[data-portrait="true"] .touch-side-right {
 	flex-direction: column;
 	align-items: center;
-	gap: 1.25rem;
+	gap: 0.85rem;
 }
 
 /* Linha Superior dos Gatilhos */
@@ -1193,27 +1193,14 @@
 	box-shadow: 0 0 15px rgba(255, 60, 74, 0.5);
 }
 
-/* Botões de Sistema (-, +, Home, Capture) */
-.touch-btn-sys,
-.touch-btn-home,
-.touch-btn-capture {
+/* Botões de Sistema (-, +) */
+.touch-btn-sys {
 	width: 2.2rem;
 	height: 2.2rem;
-	font-size: 0.95rem;
-	border-color: rgba(255, 255, 255, 0.15);
+	font-size: 1.05rem;
+	font-weight: 800;
+	border-color: rgba(255, 255, 255, 0.2);
 	background: rgba(20, 25, 35, 0.7);
-}
-
-.touch-btn-home {
-	font-size: 0.85rem;
-	border-color: rgba(0, 180, 216, 0.3);
-}
-
-.touch-btn-capture {
-	font-size: 1rem;
-	border-radius: 6px;
-	width: 2rem;
-	height: 2rem;
 }
 
 /* Linha Principal (Lado Esquerdo e Direito) */
@@ -1279,16 +1266,49 @@
 	will-change: transform;
 }
 
-.touch-stick-click {
-	width: 100%;
-	height: 100%;
-	border: none;
-	background: transparent;
-	color: rgba(255, 255, 255, 0.4);
-	font-size: 0.65rem;
+.touch-stick-knob::after {
+	content: "";
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	border: 1.5px solid rgba(255, 255, 255, 0.22);
+	background: radial-gradient(circle at 40% 40%, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.45));
+	box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8);
+	pointer-events: none;
+}
+
+/* Botões Dedicados L3 e R3 */
+.touch-btn-stick-sub {
+	min-width: 44px;
+	height: 34px;
+	padding: 0 0.6rem;
+	border-radius: 17px;
+	font-size: 0.82rem;
 	font-weight: 800;
-	pointer-events: auto;
-	cursor: pointer;
+	letter-spacing: 0.04em;
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+}
+
+.touch-btn-l3 {
+	border-color: rgba(0, 180, 216, 0.55);
+	background: rgba(0, 180, 216, 0.16);
+	color: #00b4d8;
+}
+
+.touch-btn-l3:active {
+	background: rgba(0, 180, 216, 0.45);
+	box-shadow: 0 0 16px rgba(0, 180, 216, 0.6);
+}
+
+.touch-btn-r3 {
+	border-color: rgba(255, 60, 74, 0.55);
+	background: rgba(255, 60, 74, 0.16);
+	color: #ff3c4a;
+}
+
+.touch-btn-r3:active {
+	background: rgba(255, 60, 74, 0.45);
+	box-shadow: 0 0 16px rgba(255, 60, 74, 0.6);
 }
 
 /* D-Pad (Direcionais em Cruz) */
@@ -1432,5 +1452,10 @@
 	}
 	.touch-shoulder-row {
 		margin-bottom: -0.25rem;
+	}
+	.touch-btn-stick-sub {
+		min-width: 38px;
+		height: 30px;
+		font-size: 0.75rem;
 	}
 }

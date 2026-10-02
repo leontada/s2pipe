@@ -246,12 +246,6 @@ export default function TouchGamepad({ visible = true, opacity = 0.7 }: Props) {
 					<button type="button" class="touch-btn touch-btn-sys" {...btnEvents(PadButton.Minus)} title="Minus (-)">
 						−
 					</button>
-					<button type="button" class="touch-btn touch-btn-capture" {...btnEvents(PadButton.Capture)} title="Capture">
-						⊚
-					</button>
-					<button type="button" class="touch-btn touch-btn-home" {...btnEvents(PadButton.Home)} title="Home">
-						🏠
-					</button>
 					<button type="button" class="touch-btn touch-btn-sys" {...btnEvents(PadButton.Plus)} title="Plus (+)">
 						+
 					</button>
@@ -278,12 +272,17 @@ export default function TouchGamepad({ visible = true, opacity = 0.7 }: Props) {
 						onTouchEnd={onLStickEnd}
 						onTouchCancel={onLStickEnd}
 					>
-						<div class="touch-stick-knob" ref={lKnobRef}>
-							<button type="button" class="touch-stick-click" {...btnEvents(PadButton.LStick)}>
-								L3
-							</button>
-						</div>
+						<div class="touch-stick-knob" ref={lKnobRef} />
 					</div>
+
+					<button
+						type="button"
+						class="touch-btn touch-btn-stick-sub touch-btn-r3"
+						{...btnEvents(PadButton.RStick)}
+						title="R3 (Stick Direito)"
+					>
+						R3
+					</button>
 
 					<div class="touch-dpad">
 						<button type="button" class="touch-btn touch-dpad-up" {...btnEvents(PadButton.Up)}>
@@ -324,6 +323,15 @@ export default function TouchGamepad({ visible = true, opacity = 0.7 }: Props) {
 						</button>
 					</div>
 
+					<button
+						type="button"
+						class="touch-btn touch-btn-stick-sub touch-btn-l3"
+						{...btnEvents(PadButton.LStick)}
+						title="L3 (Stick Esquerdo)"
+					>
+						L3
+					</button>
+
 					<div
 						class="touch-stick-base touch-rstick"
 						ref={rBaseRef}
@@ -332,11 +340,7 @@ export default function TouchGamepad({ visible = true, opacity = 0.7 }: Props) {
 						onTouchEnd={onRStickEnd}
 						onTouchCancel={onRStickEnd}
 					>
-						<div class="touch-stick-knob" ref={rKnobRef}>
-							<button type="button" class="touch-stick-click" {...btnEvents(PadButton.RStick)}>
-								R3
-							</button>
-						</div>
+						<div class="touch-stick-knob" ref={rKnobRef} />
 					</div>
 				</div>
 			</div>
