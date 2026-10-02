@@ -24,6 +24,8 @@ export type GamepadOption = {
 	id: string;
 };
 
+export const TOUCH_INDEX = -1;
+
 const DEADZONE = 0.12;
 
 /**
@@ -209,10 +211,21 @@ export function createInputTracker() {
 			clearKeys();
 		},
 
-		sample(source: InputSource): PadState {
-			const pad = source.kind === "touch"
-				? getTouchState()
-				: (sampleGamepad(source.index) ?? neutralPad());
+		sample(source: number | InputSource | null, extraKeys = false): PadState {
+			let pad: PadState;
+			if (typeof source === "number") {
+				pad = source === TOUCH_INDEX ? getTouchState() : (sampleGamepad(source) ?? neutralPad());
+			} else if (source === null) {
+				pad = neutralPad();
+			} else if (source.kind === "touch") {
+				pad = getTouchState();
+			} else {
+				pad = sampleGamepad(source.index) ?? neutralPad();
+			}
+
+			if (!extraKeys) {
+				return pad;
+			}
 
 			let extraButtons = 0;
 

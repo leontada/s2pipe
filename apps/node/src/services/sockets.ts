@@ -6,10 +6,16 @@ const viewers = new Set<WebSocket>();
 const mutedSeats: boolean[] = Array.from({ length: PAD_COUNT }, () => false);
 let allMuted = false;
 
+export function occupiedSeats(): number[] {
+	const out: number[] = [];
+	for (let i = 0; i < seats.length; i++) {
+		if (seats[i] !== null) out.push(i);
+	}
+	return out;
+}
+
 export function playingCount(): number {
-	let n = 0;
-	for (const seat of seats) if (seat !== null) n++;
-	return n;
+	return occupiedSeats().length;
 }
 
 export function viewerCount(): number {
@@ -20,32 +26,56 @@ export function addViewer(ws: WebSocket): void {
 	viewers.add(ws);
 }
 
+export function padsOf(ws: WebSocket): number[] {
+	const out: number[] = [];
+	for (let i = 0; i < seats.length; i++) {
+		if (seats[i] === ws) out.push(i);
+	}
+	return out;
+}
+
 export function padOf(ws: WebSocket): number | undefined {
 	const i = seats.indexOf(ws);
 	return i < 0 ? undefined : i;
 }
 
-export function playPad(ws: WebSocket): number | undefined {
-	const current = padOf(ws);
-	if (current !== undefined) return current;
-	const i = seats.indexOf(null);
-	if (i < 0) return undefined;
-	seats[i] = ws;
-	mutedSeats[i] = false;
-	return i;
+export function ownsSeat(ws: WebSocket, seat: number): boolean {
+	return Number.isInteger(seat) && seat >= 0 && seat < seats.length && seats[seat] === ws;
 }
 
-export function watchPad(ws: WebSocket): number | undefined {
-	const i = padOf(ws);
-	if (i === undefined) return undefined;
-	seats[i] = null;
-	mutedSeats[i] = false;
-	return i;
+export function playPads(ws: WebSocket, count: number): number[] {
+	const want = Math.max(0, Math.min(PAD_COUNT, Math.floor(count)));
+	const have = padsOf(ws);
+
+	while (have.length > want) {
+		const released = have.pop()!;
+		seats[released] = null;
+		mutedSeats[released] = false;
+	}
+
+	for (let i = 0; i < PAD_COUNT && have.length < want; i++) {
+		if (seats[i] === null) {
+			seats[i] = ws;
+			mutedSeats[i] = false;
+			have.push(i);
+		}
+	}
+
+	return have;
 }
 
-export function dropViewer(ws: WebSocket): number | undefined {
+export function watchPads(ws: WebSocket): number[] {
+	const released = padsOf(ws);
+	for (const i of released) {
+		seats[i] = null;
+		mutedSeats[i] = false;
+	}
+	return released;
+}
+
+export function dropViewer(ws: WebSocket): number[] {
 	viewers.delete(ws);
-	return watchPad(ws);
+	return watchPads(ws);
 }
 
 export function forEachViewer(fn: (ws: WebSocket) => void): void {

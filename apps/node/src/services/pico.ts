@@ -181,6 +181,7 @@ async function setSerialBaud(path: string): Promise<void> {
 				"-ixon",
 				"-ixoff",
 				"clocal",
+				"-hupcl",
 			],
 			stdout: "piped",
 			stderr: "piped",
@@ -201,6 +202,14 @@ async function setSerialBaud(path: string): Promise<void> {
 	}
 }
 
+function serialError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	if (Deno.build.os === "linux" && /permission denied/i.test(message)) {
+		return `${message} (add your user to dialout, then replug)`;
+	}
+	return message;
+}
+
 async function openPico(): Promise<void> {
 	if (!config.picoSerial || file) return;
 
@@ -212,7 +221,7 @@ async function openPico(): Promise<void> {
 		startFlush();
 		await flush();
 	} catch (error) {
-		picoError = error instanceof Error ? error.message : String(error);
+		picoError = serialError(error);
 		closePico();
 	}
 }

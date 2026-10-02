@@ -1,7 +1,7 @@
 import { Router } from "@webtools/expressapi";
 
 import { captureStatus } from "@/services/capture.ts";
-import { playingCount } from "@/services/sockets.ts";
+import { occupiedSeats, playingCount } from "@/services/sockets.ts";
 import { picoStatus } from "@/services/pico.ts";
 import type { NodeStatus } from "@s2pipe/shared/types/node";
 
@@ -16,6 +16,7 @@ export default new Router()
 				uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
 				capture: await captureStatus(),
 				pico: picoStatus(),
+				occupied: occupiedSeats(),
 				playing: playingCount(),
 			} satisfies NodeStatus,
 		}));

@@ -3,7 +3,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { Activity, Eye, Gamepad2, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
-import { PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
+import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
 
 import {
 	createInputTracker,
@@ -12,6 +12,7 @@ import {
 	isTouchDevice,
 	KEYBOARD_HELP,
 	listGamepads,
+	TOUCH_INDEX,
 } from "../utils/input.ts";
 import TouchGamepad from "../components/touch-gamepad.tsx";
 import {
@@ -64,8 +65,15 @@ function picoTitle(pico: PicoStatus | null): string | undefined {
 	return parts.length ? parts.join("\n") : undefined;
 }
 
-function firstPad(list: GamepadOption[]): InputSource | null {
-	return list[0] ? { kind: "gamepad", index: list[0].index } : null;
+function padLabel(id: string): string {
+	const name = id.split("(")[0]?.trim();
+	return name || id;
+}
+
+const NEUTRAL = neutralPad();
+
+function sameIds(a: number[], b: number[]): boolean {
+	return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 function streamBanner(
@@ -102,6 +110,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const statsPrev = useRef<{ bytes: number; at: number } | null>(null);
 	const toastSeq = useRef(0);
 	const playRequested = useRef(false);
+	const pendingPlays = useRef(0);
 	const persistPrefs = useRef(false);
 
 	const playing = useSignal(false);
@@ -110,6 +119,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const capture = useSignal<CaptureStatus | null>(null);
 	const pico = useSignal<PicoStatus | null>(null);
 	const pads = useSignal<GamepadOption[]>([]);
+	const chosen = useSignal<number[]>([]);
+	const seats = useSignal<number[]>([]);
+	const occupied = useSignal<number[]>([]);
+	const livePads = useSignal<number[]>([]);
 	const source = useSignal<InputSource | null>(null);
 	const settings = useSignal(false);
 	const muted = useSignal(false);
@@ -285,7 +298,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		let cancelled = false;
 		let videoHandle: WhepHandle | null = null;
 		let audioHandle: AudioWhepHandle | null = null;
-		let retryTimer = 0;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let iceHinted = false;
 
 		const cleanupWhep = () => {
@@ -365,7 +378,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	useEffect(() => {
 		if (!turnstilePassed.value) return;
 		let socket: WebSocket | null = null;
-		let retryTimer = 0;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let isClosed = false;
 
 		function connectWs() {
@@ -381,6 +394,12 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						send(socket, { op: "admin_login", password: savedAdmin });
 					}
 				} catch {}
+				const count = chosen.value.length;
+				if (count > 0) {
+					pendingPlays.current += 1;
+					const savedPin = localStorage.getItem("s2pipe_player_pin") ?? undefined;
+					send(socket, { op: "play", pin: savedPin, data: { count } });
+				}
 			});
 
 			socket.addEventListener("message", (event) => {
@@ -388,8 +407,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				try {
 					const msg = JSON.parse(event.data) as ServerMessage;
 					if (msg.op === "play") {
-						if (msg.data.playing) {
-							playing.value = true;
+						pendingPlays.current = Math.max(0, pendingPlays.current - 1);
+						const granted = msg.data.seats ?? (msg.data.playing ? [0] : []);
+						seats.value = granted;
+						playing.value = granted.length > 0;
+						if (granted.length > 0) {
 							playRequested.current = false;
 							pinModalOpen.value = false;
 							pinError.value = "";
@@ -400,7 +422,6 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							}
 						} else {
 							playRequested.current = false;
-							playing.value = false;
 							inputMuted.value = false;
 							if (msg.data.error === "invalid_pin") {
 								pinModalOpen.value = true;
@@ -410,17 +431,29 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 								} catch {}
 							} else if (msg.data.error === "kicked_by_admin") {
 								toast("You were moved to the audience by an admin.");
+								chosen.value = [];
 							} else if (msg.data.error === "all_seats_full") {
 								toast("All remote pads are currently occupied.");
 							} else {
 								toast("Unable to take a pad.");
 							}
 						}
+						if (pendingPlays.current === 0 && granted.length < chosen.value.length) {
+							chosen.value = chosen.value.slice(0, granted.length);
+							if (granted.length > 0) {
+								toast(`Claimed ${granted.length} pad(s). Not enough remote pads for all.`);
+							}
+						}
 					} else if (msg.op === "status") {
 						capture.value = msg.data.capture;
 						if (!msg.data.capture.running) live.value = false;
 						pico.value = msg.data.pico;
-						playingCount.value = msg.data.playing;
+						if (Array.isArray(msg.data.occupied)) {
+							occupied.value = msg.data.occupied;
+							playingCount.value = msg.data.occupied.length;
+						} else if (typeof msg.data.playing === "number") {
+							playingCount.value = msg.data.playing;
+						}
 						if (typeof msg.data.viewers === "number") {
 							viewersCount.value = msg.data.viewers;
 						}
@@ -474,6 +507,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			socket.addEventListener("close", () => {
 				wsRef.current = null;
 				playRequested.current = false;
+				pendingPlays.current = 0;
+				seats.value = [];
 				playing.value = false;
 				inputMuted.value = false;
 				connected.value = false;
@@ -503,15 +538,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		const updatePads = () => {
 			const next = listGamepads();
 			pads.value = next;
-			const current = source.value;
-			if (current?.kind === "touch") return;
-			if (!current || !next.some((pad) => pad.index === current.index)) {
-				if (next.length > 0) {
-					source.value = firstPad(next);
-				} else if (touchEnabled.value || isTouchDevice()) {
-					source.value = { kind: "touch" };
-				}
-			}
+			const still = chosen.value.filter((index) => index === TOUCH_INDEX || next.some((p) => p.index === index));
+			const lost = still.length !== chosen.value.length;
+			chosen.value = still;
+			if (lost) syncSeats(still.length);
 		};
 
 		updatePads();
@@ -528,28 +558,73 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	// Boucle d'envoi des inputs de la manette
 	useEffect(() => {
-		if (!playing.value) return;
 		let frame = 0;
-		let lastState: PadState | null = null;
+		const lastBySeat = new Map<number, PadState>();
+		let lastAssignedKey = "";
 
 		const loop = () => {
 			frame = requestAnimationFrame(loop);
 			const tracker = inputRef.current;
+			if (!tracker) return;
+
+			const sampled = new Map<number, PadState>();
+			const active: number[] = [];
+			for (const pad of pads.value) {
+				const state = tracker.sample(pad.index, false);
+				sampled.set(pad.index, state);
+				if (!samePad(state, NEUTRAL)) active.push(pad.index);
+			}
+			if (touchEnabled.value) {
+				const touchState = tracker.sample(TOUCH_INDEX, false);
+				if (!samePad(touchState, NEUTRAL)) active.push(TOUCH_INDEX);
+			}
+			if (!sameIds(active, livePads.value)) livePads.value = active;
+
 			const ws = wsRef.current;
-			const pad = source.value;
+			const assigned = seats.value;
+			const assignedKey = assigned.join(",");
+			if (!ws || ws.readyState !== WebSocket.OPEN || !assigned.length) {
+				if (lastAssignedKey) {
+					lastBySeat.clear();
+					lastAssignedKey = "";
+				}
+				return;
+			}
 
-			if (!tracker || !pad || !ws || ws.readyState !== WebSocket.OPEN) return;
+			if (assignedKey !== lastAssignedKey) {
+				lastBySeat.clear();
+				lastAssignedKey = assignedKey;
+			}
 
-			const state = tracker.sample(pad);
-			if (lastState !== null && samePad(lastState, state)) return;
+			if (inputMuted.value) return;
 
-			lastState = state;
-			send(ws, { op: "pad", data: state });
+			const currentChosen = chosen.value;
+			for (let i = 0; i < assigned.length; i++) {
+				const seat = assigned[i]!;
+				const chosenId = currentChosen[i];
+				let state: PadState;
+				if (chosenId === TOUCH_INDEX) {
+					state = tracker.sample(TOUCH_INDEX, true);
+				} else if (typeof chosenId === "number") {
+					state = i === 0
+						? tracker.sample(chosenId, true)
+						: (sampled.get(chosenId) ?? NEUTRAL);
+				} else if (i === 0) {
+					state = tracker.sample(null, true);
+				} else {
+					state = NEUTRAL;
+				}
+
+				const previous = lastBySeat.get(seat);
+				if (previous && samePad(previous, state)) continue;
+				lastBySeat.set(seat, state);
+				send(ws, { op: "pad", data: state, seat });
+			}
 		};
 
 		frame = requestAnimationFrame(loop);
 		return () => cancelAnimationFrame(frame);
-	}, [playing.value]);
+	}, []);
 
 	// Raccourci Clavier (Échap pour les paramètres)
 	useEffect(() => {
@@ -604,30 +679,65 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		return () => document.removeEventListener("fullscreenchange", onFs);
 	}, []);
 
-	function requestPlay(pin?: string): void {
-		if (playing.value || wsRef.current?.readyState !== WebSocket.OPEN) return;
-		playRequested.current = true;
-		lastAttemptedPin.value = pin ?? "";
-		send(wsRef.current, { op: "play", pin });
+	function syncSeats(count: number, pin?: string): void {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		if (count > 0) {
+			if (pinRequired.value) {
+				let savedPin = pin ?? "";
+				if (!savedPin) {
+					try {
+						savedPin = localStorage.getItem("s2pipe_player_pin") ?? "";
+					} catch {}
+				}
+				if (!savedPin) {
+					pinInput.value = "";
+					pinError.value = "";
+					pinModalOpen.value = true;
+					return;
+				}
+				lastAttemptedPin.value = savedPin;
+				pendingPlays.current += 1;
+				send(ws, { op: "play", pin: savedPin, data: { count } });
+				return;
+			}
+			pendingPlays.current += 1;
+			send(ws, { op: "play", data: { count } });
+			return;
+		}
+		pendingPlays.current = 0;
+		seats.value = [];
+		playing.value = false;
+		inputMuted.value = false;
+		send(ws, { op: "watch" });
+	}
+
+	function toggleSeat(index: number): void {
+		const claimed = chosen.value.includes(index);
+		if (!claimed && occupied.value.length >= PAD_COUNT) {
+			toast("All remote pads are occupied.");
+			return;
+		}
+		const nextChosen = claimed
+			? chosen.value.filter((item) => item !== index)
+			: [...chosen.value, index];
+		chosen.value = nextChosen;
+		syncSeats(nextChosen.length);
 	}
 
 	function play(): void {
-		if (playing.value || wsRef.current?.readyState !== WebSocket.OPEN) return;
-		if (pinRequired.value) {
-			let savedPin = "";
-			try {
-				savedPin = localStorage.getItem("s2pipe_player_pin") ?? "";
-			} catch {}
-			if (savedPin) {
-				requestPlay(savedPin);
-				return;
+		if (seats.value.length > 0) return;
+		if (chosen.value.length === 0) {
+			if (pads.value.length > 0) {
+				chosen.value = [pads.value[0].index];
+			} else if (touchEnabled.value || isTouchDevice()) {
+				touchEnabled.value = true;
+				chosen.value = [TOUCH_INDEX];
+			} else {
+				chosen.value = [0];
 			}
-			pinInput.value = "";
-			pinError.value = "";
-			pinModalOpen.value = true;
-			return;
 		}
-		requestPlay();
+		syncSeats(chosen.value.length);
 	}
 
 	function submitPin(event?: Event): void {
@@ -637,13 +747,14 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			pinError.value = "Please enter the PIN.";
 			return;
 		}
-		requestPlay(pin);
+		const targetCount = chosen.value.length > 0 ? chosen.value.length : 1;
+		syncSeats(targetCount, pin);
 	}
 
 	function cancelPin(): void {
 		pinModalOpen.value = false;
 		pinError.value = "";
-		playRequested.current = false;
+		pendingPlays.current = 0;
 	}
 
 	function submitAdminLogin(event?: Event): void {
@@ -696,10 +807,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	}
 
 	function watch(): void {
-		playRequested.current = false;
-		playing.value = false;
-		inputMuted.value = false;
-		send(wsRef.current, { op: "watch" });
+		chosen.value = [];
+		syncSeats(0);
 	}
 
 	function onStageClick(): void {
@@ -722,8 +831,13 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	}
 
 	const hideHud = fullscreen.value;
-	const padsFull = playingCount.value >= PAD_COUNT && !playing.value;
+	const padsFull = occupied.value.length >= PAD_COUNT && seats.value.length === 0;
 	const banner = streamBanner(connected.value, capture.value, live.value);
+
+	const seatByChosen = new Map<number, number>();
+	for (let i = 0; i < seats.value.length && i < chosen.value.length; i++) {
+		seatByChosen.set(chosen.value[i]!, seats.value[i]!);
+	}
 
 	return (
 		<section
@@ -831,27 +945,39 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					</span>
 					<div class="play-slots">
 						<span class="play-count">
-							{playingCount.value}/{PAD_COUNT} playing
+							{occupied.value.length}/{PAD_COUNT} playing
 							{viewersCount.value > 0 && (
 								<span class="play-viewers-tag" title={`${viewersCount.value} connected viewer${viewersCount.value > 1 ? "s" : ""}`}>
 									· {viewersCount.value} viewer{viewersCount.value > 1 ? "s" : ""}
 								</span>
 							)}
 						</span>
+						<div class="play-seat-indicators" title={`${occupied.value.length} of ${PAD_COUNT} slots occupied`}>
+							{Array.from({ length: PAD_COUNT }, (_, idx) => {
+								const isYou = seats.value.includes(idx);
+								const isOcc = occupied.value.includes(idx);
+								const cls = isYou ? "seat-dot seat-dot-you" : isOcc ? "seat-dot seat-dot-occ" : "seat-dot";
+								return (
+									<span key={idx} class={cls} title={`Slot ${idx + 1}: ${isYou ? "You" : isOcc ? "Occupied" : "Free"}`}>
+										{idx + 1}
+									</span>
+								);
+							})}
+						</div>
 						<button
 							type="button"
 							class="play-slot"
-							data-state={playing.value ? "you" : "free"}
+							data-state={seats.value.length > 0 ? "you" : "free"}
 							disabled={padsFull}
 							onClick={play}
 						>
-							{pinRequired.value && !playing.value ? <Lock size={14} aria-hidden="true" /> : <Gamepad2 size={14} aria-hidden="true" />}
-							Play
+							{pinRequired.value && seats.value.length === 0 ? <Lock size={14} aria-hidden="true" /> : <Gamepad2 size={14} aria-hidden="true" />}
+							{seats.value.length > 0 ? `Playing (${seats.value.map((s) => `P${s + 1}`).join(", ")})` : "Play"}
 						</button>
 						<button
 							type="button"
 							class="play-slot"
-							data-state={!playing.value ? "you" : "free"}
+							data-state={seats.value.length === 0 ? "you" : "free"}
 							onClick={watch}
 						>
 							<Eye size={14} aria-hidden="true" />
@@ -882,32 +1008,64 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				</div>
 
 				<div class="play-bottom">
-					<label class="play-controller">
-						<select
-							aria-label="Controller"
-							value={source.value?.kind === "touch" ? "touch" : source.value ? String(source.value.index) : ""}
-							onChange={(e) => {
-								const val = (e.target as HTMLSelectElement).value;
-								if (val === "touch") {
-									source.value = { kind: "touch" };
-									touchEnabled.value = true;
-								} else {
-									const idx = Number(val);
-									if (Number.isFinite(idx)) source.value = { kind: "gamepad", index: idx };
-								}
-							}}
-						>
-							<option value="touch">📱 Controle Touch na Tela</option>
-							{pads.value.map((pad) => <option value={String(pad.index)}>{pad.id}</option>)}
-							{pads.value.length === 0 && !source.value && <option value="" disabled>No physical gamepad</option>}
-						</select>
-						{connected.value && !playing.value && (
-							<span class="play-hint">Click Play, then use a gamepad.</span>
+					<div class="play-controller">
+						<div class="play-controller-bar">
+							{(touchEnabled.value || isTouchDevice()) && (() => {
+								const seat = seatByChosen.get(TOUCH_INDEX);
+								const claimed = chosen.value.includes(TOUCH_INDEX);
+								const full = occupied.value.length >= PAD_COUNT && !claimed;
+								const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
+								const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
+								return (
+									<button
+										type="button"
+										class="play-pad-btn"
+										data-state={state}
+										data-active={livePads.value.includes(TOUCH_INDEX) ? "true" : undefined}
+										disabled={full || !connected.value}
+										onClick={() => toggleSeat(TOUCH_INDEX)}
+									>
+										<span class="pad-icon"><Smartphone size={13} /></span>
+										<span class="pad-name">Touch Gamepad</span>
+										<span class="pad-status">{status}</span>
+									</button>
+								);
+							})()}
+
+							{pads.value.map((pad) => {
+								const seat = seatByChosen.get(pad.index);
+								const claimed = chosen.value.includes(pad.index);
+								const full = occupied.value.length >= PAD_COUNT && !claimed;
+								const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
+								const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
+								return (
+									<button
+										type="button"
+										key={pad.index}
+										class="play-pad-btn"
+										data-state={state}
+										data-active={livePads.value.includes(pad.index) ? "true" : undefined}
+										disabled={full || !connected.value}
+										onClick={() => toggleSeat(pad.index)}
+									>
+										<span class="pad-icon"><Gamepad2 size={13} /></span>
+										<span class="pad-name">{padLabel(pad.id)}</span>
+										<span class="pad-status">{status}</span>
+									</button>
+								);
+							})}
+
+							{pads.value.length === 0 && !touchEnabled.value && !isTouchDevice() && (
+								<p class="play-hint">Connect a gamepad or click the phone icon to play.</p>
+							)}
+						</div>
+						{connected.value && seats.value.length === 0 && (
+							<span class="play-hint">Click a controller or Play above to join.</span>
 						)}
-						{connected.value && playing.value && inputMuted.value && (
+						{connected.value && seats.value.length > 0 && inputMuted.value && (
 							<span class="play-hint play-hint-warn">⚠️ Gamepad inputs paused by admin</span>
 						)}
-					</label>
+					</div>
 					<div class="play-tools">
 						<button
 							type="button"
@@ -918,9 +1076,16 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							onClick={() => {
 								touchEnabled.value = !touchEnabled.value;
 								if (touchEnabled.value) {
-									source.value = { kind: "touch" };
+									if (!chosen.value.includes(TOUCH_INDEX)) {
+										chosen.value = [...chosen.value, TOUCH_INDEX];
+										syncSeats(chosen.value.length);
+									}
 									toast("Controles na tela ativados");
 								} else {
+									if (chosen.value.includes(TOUCH_INDEX)) {
+										chosen.value = chosen.value.filter((i) => i !== TOUCH_INDEX);
+										syncSeats(chosen.value.length);
+									}
 									toast("Controles na tela ocultos");
 								}
 							}}
@@ -966,7 +1131,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			</div>
 
 			<TouchGamepad
-				visible={touchEnabled.value && (playing.value || pads.value.length === 0)}
+				visible={touchEnabled.value && (seats.value.length > 0 || pads.value.length === 0)}
 				opacity={touchOpacity.value}
 			/>
 
@@ -1030,8 +1195,15 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							type="checkbox"
 							checked={touchEnabled.value}
 							onChange={(event) => {
-								touchEnabled.value = (event.target as HTMLInputElement).checked;
-								if (touchEnabled.value) source.value = { kind: "touch" };
+								const enabled = (event.target as HTMLInputElement).checked;
+								touchEnabled.value = enabled;
+								if (enabled && !chosen.value.includes(TOUCH_INDEX)) {
+									chosen.value = [...chosen.value, TOUCH_INDEX];
+									syncSeats(chosen.value.length);
+								} else if (!enabled && chosen.value.includes(TOUCH_INDEX)) {
+									chosen.value = chosen.value.filter((i) => i !== TOUCH_INDEX);
+									syncSeats(chosen.value.length);
+								}
 							}}
 						/>
 						Controles na Tela (Touch Gamepad)
@@ -1143,7 +1315,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 									</div>
 								</div>
 								<div class="admin-seats-list">
-									{(adminState.value?.seats ?? [0, 1, 2, 3].map((i) => ({ seat: i, occupied: false, muted: false }))).map((s) => (
+									{(adminState.value?.seats ?? Array.from({ length: PAD_COUNT }, (_, i) => ({ seat: i, occupied: false, muted: false }))).map((s) => (
 										<div key={s.seat} class="admin-seat-row">
 											<span class="admin-seat-label">
 												Slot {s.seat + 1}:{" "}

@@ -16,6 +16,7 @@ export type PicoStatus = {
 export type StatusData = {
 	capture: CaptureStatus;
 	pico: PicoStatus;
+	occupied: number[];
 	playing: number;
 	viewers?: number;
 	pinRequired?: boolean;
@@ -39,9 +40,9 @@ export type AdminState = {
 };
 
 export type ClientMessage =
-	| { op: "play"; pin?: string }
+	| { op: "play"; data?: { count?: number }; pin?: string }
 	| { op: "watch" }
-	| { op: "pad"; data: PadState }
+	| { op: "pad"; data: PadState; seat?: number }
 	| { op: "pong" }
 	| { op: "admin_login"; password: string }
 	| { op: "admin_kick"; seat: number }
@@ -52,7 +53,7 @@ export type ClientMessage =
 
 export type ServerMessage =
 	| { op: "status"; data: StatusData }
-	| { op: "play"; data: { playing: boolean; error?: string } }
+	| { op: "play"; data: { playing: boolean; seats?: number[]; error?: string } }
 	| { op: "ping" }
 	| { op: "admin_auth"; data: { ok: boolean } }
 	| { op: "admin_state"; data: AdminState }

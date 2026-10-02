@@ -11,13 +11,16 @@ import {
 	isSeatMuted,
 	kickAllSeats,
 	kickSeat,
+	occupiedSeats,
+	ownsSeat,
 	padOf,
+	padsOf,
 	playingCount,
-	playPad,
+	playPads,
 	setAllMuted,
 	setSeatMuted,
 	viewerCount,
-	watchPad,
+	watchPads,
 } from "@/services/sockets.ts";
 import type { ClientMessage, ServerMessage } from "@s2pipe/shared/types/node";
 
@@ -56,6 +59,7 @@ async function currentStatus(): Promise<ServerMessage> {
 		data: {
 			capture,
 			pico: picoStatus(),
+			occupied: occupiedSeats(),
 			playing: playingCount(),
 			viewers: viewerCount(),
 			pinRequired: Boolean(config.playerPin),
@@ -67,6 +71,12 @@ async function pushStatus(): Promise<void> {
 	const message = await currentStatus();
 	forEachViewer((ws) => send(ws, message));
 	pushAdminState();
+}
+
+function resetSeats(indices: number[]): void {
+	if (!indices.length) return;
+	for (const seat of indices) clearPad(seat);
+	void pushStatus();
 }
 
 setInterval(() => {
@@ -100,42 +110,49 @@ function bind(ws: WebSocket): void {
 					if (config.playerPin) {
 						const providedPin = msg.pin ? msg.pin.trim() : "";
 						if (providedPin !== config.playerPin) {
-							send(ws, { op: "play", data: { playing: false, error: "invalid_pin" } });
+							send(ws, { op: "play", data: { playing: false, seats: [], error: "invalid_pin" } });
 							return;
 						}
 					}
-					const existing = padOf(ws);
-					const seat = playPad(ws);
+					const previous = padsOf(ws);
+					const raw = msg.data?.count;
+					const count = typeof raw === "number" && Number.isFinite(raw) ? raw : 1;
+					const assigned = playPads(ws, count);
 					send(ws, {
 						op: "play",
 						data: {
-							playing: seat !== undefined,
-							error: seat === undefined ? "all_seats_full" : undefined,
+							playing: assigned.length > 0,
+							seats: assigned,
+							error: assigned.length === 0 ? "all_seats_full" : undefined,
 						},
 					});
-					if (existing === undefined && seat !== undefined) {
-						clearPad(seat);
+					if (assigned.length > 0) {
 						triggerWake(false);
-						if (isSeatMuted(seat)) {
+					}
+					for (const seat of assigned) {
+						if (!previous.includes(seat) && isSeatMuted(seat)) {
 							send(ws, {
 								op: "input_status",
 								data: { muted: true, reason: "admin" },
 							});
+							break;
 						}
-						void pushStatus();
 					}
+					resetSeats([
+						...previous.filter((seat) => !assigned.includes(seat)),
+						...assigned.filter((seat) => !previous.includes(seat)),
+					]);
 					return;
 				}
 				case "watch": {
-					const released = watchPad(ws);
-					if (released === undefined) return;
-					clearPad(released);
-					void pushStatus();
+					resetSeats(watchPads(ws));
 					return;
 				}
 				case "pad": {
-					const seat = padOf(ws);
-					if (seat !== undefined && !isSeatMuted(seat)) setPad(seat, msg.data);
+					const seat = typeof msg.seat === "number" ? msg.seat : padOf(ws);
+					if (seat !== undefined && ownsSeat(ws, seat) && !isSeatMuted(seat)) {
+						setPad(seat, msg.data);
+					}
 					return;
 				}
 				case "admin_login": {
@@ -155,7 +172,7 @@ function bind(ws: WebSocket): void {
 					const kickedWs = kickSeat(msg.seat);
 					if (kickedWs) {
 						clearPad(msg.seat);
-						send(kickedWs, { op: "play", data: { playing: false, error: "kicked_by_admin" } });
+						send(kickedWs, { op: "play", data: { playing: false, seats: padsOf(kickedWs), error: "kicked_by_admin" } });
 						void pushStatus();
 					}
 					return;
@@ -165,7 +182,7 @@ function bind(ws: WebSocket): void {
 					const kickedList = kickAllSeats();
 					for (const item of kickedList) {
 						clearPad(item.seat);
-						send(item.ws, { op: "play", data: { playing: false, error: "kicked_by_admin" } });
+						send(item.ws, { op: "play", data: { playing: false, seats: [], error: "kicked_by_admin" } });
 					}
 					if (kickedList.length > 0) {
 						void pushStatus();
@@ -214,12 +231,7 @@ function bind(ws: WebSocket): void {
 		clearInterval(heartbeat);
 		adminSockets.delete(ws);
 		const released = dropViewer(ws);
-		if (released === undefined) {
-			void pushStatus();
-			return;
-		}
-		clearPad(released);
-		void pushStatus();
+		resetSeats(released);
 	});
 }
 
@@ -237,3 +249,4 @@ export default new Router()
 
 		return response;
 	});
+
