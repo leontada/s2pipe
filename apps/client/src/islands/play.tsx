@@ -100,6 +100,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const effectiveSiteKey = turnstileSiteKey || getTurnstileSiteKey() || "0x4AAAAAAEwg5V8LpgJXde_q";
 	const turnstilePassed = useSignal(false);
 	const turnstileBlocked = useSignal(false);
+	const isTurnstilePassed = turnstilePassed.value;
 	const turnstileContainerRef = useRef<HTMLDivElement>(null);
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const stageRef = useRef<HTMLElement>(null);
@@ -288,11 +289,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				try { activeCf?.remove(widgetId); } catch {}
 			}
 		};
-	}, [turnstilePassed.value, effectiveSiteKey]);
+	}, [effectiveSiteKey]);
 
 	// Gestion de la connexion WHeP (Vidéo + Audio)
 	useEffect(() => {
-		if (!turnstilePassed.value) return;
+		if (!isTurnstilePassed) return;
 		const video = videoRef.current;
 		if (!video) return;
 		let cancelled = false;
@@ -306,13 +307,17 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			void audioHandle?.close();
 			videoHandle = null;
 			audioHandle = null;
-			whepRef.current = null;
-			audioRef.current = null;
+			if (whepRef.current === videoHandle) whepRef.current = null;
+			if (audioRef.current === audioHandle) audioRef.current = null;
 		};
 
 		const connect = async () => {
 			try {
 				videoHandle = await startWhep(nodeUrl, video);
+				if (cancelled) {
+					void videoHandle.close();
+					return;
+				}
 				whepRef.current = videoHandle;
 				live.value = true;
 
@@ -337,6 +342,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			try {
 				audioHandle = await startAudioWhep(nodeUrl);
 				if (audioHandle) {
+					if (cancelled) {
+						void audioHandle.close();
+						return;
+					}
 					audioRef.current = audioHandle;
 					audioHandle.audio.muted = muted.value;
 					audioHandle.audio.volume = volume.value;
@@ -353,7 +362,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			clearTimeout(retryTimer);
 			cleanupWhep();
 		};
-	}, [nodeUrl, turnstilePassed.value]);
+	}, [nodeUrl, isTurnstilePassed]);
 
 	useEffect(() => {
 		// deno-lint-ignore no-explicit-any
@@ -376,7 +385,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	// Gestion WebSocket (Statut et Commandes)
 	useEffect(() => {
-		if (!turnstilePassed.value) return;
+		if (!isTurnstilePassed) return;
 		let socket: WebSocket | null = null;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let isClosed = false;
@@ -387,6 +396,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			wsRef.current = socket;
 
 			socket.addEventListener("open", () => {
+				wsRef.current = socket;
 				connected.value = true;
 				try {
 					const savedAdmin = sessionStorage.getItem("s2pipe_admin_pass");
@@ -511,13 +521,15 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			});
 
 			socket.addEventListener("close", () => {
-				wsRef.current = null;
+				if (wsRef.current === socket) {
+					wsRef.current = null;
+					connected.value = false;
+				}
 				playRequested.current = false;
 				pendingPlays.current = 0;
 				seats.value = [];
 				playing.value = false;
 				inputMuted.value = false;
-				connected.value = false;
 				adminAuthed.value = false;
 				if (!isClosed) {
 					retryTimer = globalThis.setTimeout(connectWs, 1500);
@@ -530,10 +542,20 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		return () => {
 			isClosed = true;
 			clearTimeout(retryTimer);
-			socket?.close();
-			wsRef.current = null;
+			if (wsRef.current === socket) {
+				wsRef.current = null;
+			}
+			if (socket) {
+				socket.onclose = null;
+				socket.onerror = null;
+				socket.onopen = null;
+				socket.onmessage = null;
+				try {
+					socket.close();
+				} catch {}
+			}
 		};
-	}, [nodeUrl, turnstilePassed.value]);
+	}, [nodeUrl, isTurnstilePassed]);
 
 	// Gestion des manettes (Gamepads)
 	useEffect(() => {
@@ -1167,9 +1189,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						</div>
 					</div>
 
-					<label class="field">
+					<label class="field" htmlFor="setting-volume">
 						<span>Volume</span>
 						<input
+							id="setting-volume"
+							name="volume"
 							type="range"
 							min="0"
 							max="1"
@@ -1182,8 +1206,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						/>
 					</label>
 
-					<label class="play-check">
+					<label class="play-check" htmlFor="setting-fill">
 						<input
+							id="setting-fill"
+							name="fill"
 							type="checkbox"
 							checked={fill.value}
 							onChange={(event) => fill.value = (event.target as HTMLInputElement).checked}
@@ -1191,8 +1217,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						Fill (crop) instead of letterbox
 					</label>
 
-					<label class="play-check">
+					<label class="play-check" htmlFor="setting-stats">
 						<input
+							id="setting-stats"
+							name="showStats"
 							type="checkbox"
 							checked={showStats.value}
 							onChange={(event) => showStats.value = (event.target as HTMLInputElement).checked}
@@ -1200,8 +1228,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						Overlay WebRTC stats
 					</label>
 
-					<label class="play-check">
+					<label class="play-check" htmlFor="setting-touch-enabled">
 						<input
+							id="setting-touch-enabled"
+							name="touchEnabled"
 							type="checkbox"
 							checked={touchEnabled.value}
 							onChange={(event) => {
@@ -1219,9 +1249,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						Controles na Tela (Touch Gamepad)
 					</label>
 					{touchEnabled.value && (
-						<label class="field">
+						<label class="field" htmlFor="setting-touch-opacity">
 							<span>Opacidade do Controle ({Math.round(touchOpacity.value * 100)}%)</span>
 							<input
+								id="setting-touch-opacity"
+								name="touchOpacity"
 								type="range"
 								min="0.2"
 								max="1"
@@ -1270,9 +1302,12 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 								<p class="admin-desc">Room &amp; player access management</p>
 								<div class="admin-login-row">
 									<input
+										id="admin-password-input"
+										name="adminPassword"
 										type="password"
 										class="admin-input"
 										placeholder="Admin password..."
+										autoComplete="current-password"
 										value={adminPasswordInput.value}
 										onInput={(event) => adminPasswordInput.value = (event.target as HTMLInputElement).value}
 									/>
@@ -1399,10 +1434,13 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 								Enter the player PIN to take gamepad controls on this console.
 							</p>
 							<input
+								id="player-pin-input"
+								name="playerPin"
 								type="password"
 								class="play-modal-input"
 								placeholder="Enter PIN..."
 								autoFocus
+								autoComplete="one-time-code"
 								value={pinInput.value}
 								onInput={(event) => pinInput.value = (event.target as HTMLInputElement).value}
 							/>
