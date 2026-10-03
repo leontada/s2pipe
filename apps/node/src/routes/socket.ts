@@ -22,6 +22,16 @@ import {
 	viewerCount,
 	watchPads,
 } from "@/services/sockets.ts";
+import {
+	canSend,
+	createMessage,
+	getChatHistory,
+	getSocketNick,
+	isChatEnabled,
+	removeSocket,
+	setChatEnabled,
+	setSocketNick,
+} from "@/services/chat.ts";
 import { PadButton } from "@s2pipe/shared/types/pad";
 import type { ClientMessage, ServerMessage } from "@s2pipe/shared/types/node";
 
@@ -41,6 +51,7 @@ function pushAdminState(targetWs?: WebSocket): void {
 			viewers: viewerCount(),
 			seats: getSeatStates(),
 			allMuted: isAllMuted(),
+			chatEnabled: isChatEnabled(),
 		},
 	};
 	if (targetWs) {
@@ -64,6 +75,7 @@ async function currentStatus(): Promise<ServerMessage> {
 			playing: playingCount(),
 			viewers: viewerCount(),
 			pinRequired: Boolean(config.playerPin),
+			chatEnabled: isChatEnabled(),
 		},
 	};
 }
@@ -98,6 +110,15 @@ function bind(ws: WebSocket): void {
 
 	const greet = () => {
 		void currentStatus().then((status) => send(ws, status));
+		const userNick = getSocketNick(ws);
+		send(ws, {
+			op: "chat_init",
+			data: {
+				enabled: isChatEnabled(),
+				userNick,
+				history: getChatHistory(),
+			},
+		});
 	};
 	if (ws.readyState === WebSocket.OPEN) greet();
 	else ws.addEventListener("open", greet, { once: true });
@@ -155,6 +176,95 @@ function bind(ws: WebSocket): void {
 						setPad(seat, {
 							...msg.data,
 							buttons: msg.data.buttons & ~(PadButton.Home | PadButton.Capture),
+						});
+					}
+					return;
+				}
+				case "chat_send": {
+					const isAdmin = adminSockets.has(ws);
+					const check = canSend(ws, isAdmin);
+					if (!check.ok) {
+						send(ws, {
+							op: "chat_msg",
+							data: {
+								id: crypto.randomUUID(),
+								nick: "Sistema",
+								text: check.reason === "chat_disabled"
+									? "O chat está desativado pelo administrador."
+									: "Você está digitando rápido demais. Aguarde um instante.",
+								time: Date.now(),
+								isSystem: true,
+							},
+						});
+						return;
+					}
+					const rawText = msg.text?.trim() || "";
+					if (!rawText) return;
+
+					// Command /nick [novo_nome]
+					if (rawText.startsWith("/nick ")) {
+						const requestedNick = rawText.slice(6).trim();
+						const oldNick = getSocketNick(ws);
+						const updatedNick = setSocketNick(ws, requestedNick);
+						if (updatedNick) {
+							send(ws, {
+								op: "chat_nick_ack",
+								data: { nick: updatedNick, success: true },
+							});
+							if (oldNick !== updatedNick) {
+								const notice = createMessage({
+									text: `"${oldNick}" agora é conhecido como "${updatedNick}"`,
+									nick: "Sistema",
+									isSystem: true,
+								});
+								if (notice) {
+									forEachViewer((v) => send(v, { op: "chat_msg", data: notice }));
+								}
+							}
+						} else {
+							send(ws, {
+								op: "chat_nick_ack",
+								data: { nick: oldNick, success: false, error: "Nome inválido (use de 2 a 24 caracteres)." },
+							});
+						}
+						return;
+					}
+
+					const senderSeat = padOf(ws);
+					const chatMsg = createMessage({
+						text: rawText,
+						nick: getSocketNick(ws),
+						seat: senderSeat,
+						isAdmin,
+					});
+					if (chatMsg) {
+						forEachViewer((v) => send(v, { op: "chat_msg", data: chatMsg }));
+					}
+					return;
+				}
+				case "chat_nick": {
+					const requestedNick = msg.nick?.trim() || "";
+					const oldNick = getSocketNick(ws);
+					const updatedNick = setSocketNick(ws, requestedNick);
+					if (updatedNick) {
+						send(ws, {
+							op: "chat_nick_ack",
+							data: { nick: updatedNick, success: true },
+						});
+						if (oldNick !== updatedNick) {
+							const notice = createMessage({
+								text: `"${oldNick}" agora é conhecido como "${updatedNick}"`,
+								nick: "Sistema",
+								isSystem: true,
+							});
+							if (notice) {
+								forEachViewer((v) => send(v, { op: "chat_msg", data: notice }));
+							}
+						}
+					} else {
+						send(ws, {
+							op: "chat_nick_ack",
+							data: { nick: oldNick, success: false, error: "Nome inválido (use de 2 a 24 caracteres)." },
 						});
 					}
 					return;
@@ -231,6 +341,24 @@ function bind(ws: WebSocket): void {
 					pushAdminState();
 					return;
 				}
+				case "admin_toggle_chat": {
+					if (!adminSockets.has(ws)) return;
+					setChatEnabled(msg.enabled);
+					const statusNotice = createMessage({
+						text: msg.enabled
+							? "O chat foi reativado pelo administrador."
+							: "O chat foi temporariamente desativado pelo administrador.",
+						nick: "Sistema",
+						isSystem: true,
+					});
+					forEachViewer((v) => {
+						send(v, { op: "chat_status", data: { enabled: msg.enabled } });
+						if (statusNotice) send(v, { op: "chat_msg", data: statusNotice });
+					});
+					pushAdminState();
+					void pushStatus();
+					return;
+				}
 			}
 		} catch {
 			// ignore bad frames
@@ -240,6 +368,7 @@ function bind(ws: WebSocket): void {
 	ws.addEventListener("close", () => {
 		clearInterval(heartbeat);
 		adminSockets.delete(ws);
+		removeSocket(ws);
 		const released = dropViewer(ws);
 		resetSeats(released);
 	});
@@ -259,4 +388,3 @@ export default new Router()
 
 		return response;
 	});
-

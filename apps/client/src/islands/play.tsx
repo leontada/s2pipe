@@ -1,8 +1,8 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Home, Lock, Maximize, Minimize, Pause, Play as PlayIcon, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
-import type { AdminState, CaptureStatus, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
+import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
 
 import {
@@ -151,6 +151,17 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const adminState = useSignal<AdminState | null>(null);
 	const inputMuted = useSignal(false);
 
+	// Chat signals
+	const chatOpen = useSignal(false);
+	const chatEnabled = useSignal(true);
+	const chatNick = useSignal("");
+	const chatMessages = useSignal<ChatMessage[]>([]);
+	const chatInput = useSignal("");
+	const chatUnread = useSignal(0);
+	const chatEditingNick = useSignal(false);
+	const chatNewNickInput = useSignal("");
+	const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
 	useEffect(() => {
 		const prefs = loadPlayPrefs();
 		muted.value = prefs.muted;
@@ -200,6 +211,23 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		setTimeout(() => {
 			toasts.value = toasts.value.filter((item) => item.id !== id);
 		}, 4200);
+	}
+
+	function sendChatMessage(text: string): void {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		send(wsRef.current, { op: "chat_send", text: trimmed });
+		chatInput.value = "";
+	}
+
+	function updateNick(newNick: string): void {
+		const trimmed = newNick.trim();
+		if (!trimmed) return;
+		send(wsRef.current, { op: "chat_nick", nick: trimmed });
+	}
+
+	function toggleAdminChat(enabled: boolean): void {
+		send(wsRef.current, { op: "admin_toggle_chat", enabled });
 	}
 
 	// Cloudflare Turnstile Gatekeeper com Resiliência Anti-Bloqueador
@@ -512,6 +540,42 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						} else {
 							toast("⚠️ Failed to send Home (Pico disconnected).");
 						}
+					} else if (msg.op === "chat_init") {
+						chatEnabled.value = msg.data.enabled;
+						let chosenNick = msg.data.userNick;
+						try {
+							const saved = localStorage.getItem("ns2_arcade_nick");
+							if (saved && saved.trim()) {
+								chosenNick = saved.trim();
+								send(socket, { op: "chat_nick", nick: chosenNick });
+							} else {
+								localStorage.setItem("ns2_arcade_nick", chosenNick);
+							}
+						} catch {}
+						chatNick.value = chosenNick;
+						chatMessages.value = msg.data.history;
+					} else if (msg.op === "chat_msg") {
+						chatMessages.value = [...chatMessages.value, msg.data];
+						if (!chatOpen.value && !msg.data.isSystem) {
+							chatUnread.value = chatUnread.value + 1;
+						}
+						setTimeout(() => {
+							chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+						}, 50);
+					} else if (msg.op === "chat_nick_ack") {
+						if (msg.data.success) {
+							chatNick.value = msg.data.nick;
+							chatEditingNick.value = false;
+							try {
+								localStorage.setItem("ns2_arcade_nick", msg.data.nick);
+							} catch {}
+							toast(`Apelido atualizado para "${msg.data.nick}"`);
+						} else {
+							toast(`Erro ao trocar apelido: ${msg.data.error || "inválido"}`);
+						}
+					} else if (msg.op === "chat_status") {
+						chatEnabled.value = msg.data.enabled;
+						toast(msg.data.enabled ? "Chat da sala ativado" : "Chat desativado pelo administrador");
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -659,7 +723,19 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.repeat) return;
 			if (event.code === "Escape") {
-				settings.value = !settings.value;
+				if (chatOpen.value) {
+					chatOpen.value = false;
+				} else {
+					settings.value = !settings.value;
+				}
+			} else if (event.code === "KeyC") {
+				const target = event.target as HTMLElement | null;
+				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+				chatOpen.value = !chatOpen.value;
+				if (chatOpen.value) {
+					chatUnread.value = 0;
+					if (settings.value) settings.value = false;
+				}
 			} else if (event.code === "KeyI" || event.code === "F3") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
@@ -1152,9 +1228,31 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						</button>
 						<button
 							type="button"
+							class="btn btn-icon play-chat-btn"
+							aria-label="Chat da Sala"
+							title={chatOpen.value ? "Fechar Chat (C)" : "Abrir Chat da Sala (C)"}
+							data-active={chatOpen.value ? "true" : undefined}
+							onClick={() => {
+								chatOpen.value = !chatOpen.value;
+								if (chatOpen.value) {
+									chatUnread.value = 0;
+									if (settings.value) settings.value = false;
+								}
+							}}
+						>
+							<MessageSquare size={16} />
+							{chatUnread.value > 0 && !chatOpen.value && (
+								<span class="chat-badge">{chatUnread.value > 9 ? "9+" : chatUnread.value}</span>
+							)}
+						</button>
+						<button
+							type="button"
 							class="btn btn-icon"
 							aria-label="Settings"
-							onClick={() => settings.value = !settings.value}
+							onClick={() => {
+								settings.value = !settings.value;
+								if (settings.value && chatOpen.value) chatOpen.value = false;
+							}}
 						>
 							<Settings size={16} />
 						</button>
@@ -1368,6 +1466,21 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 										</button>
 									</div>
 								</div>
+								<div class="admin-chat-box">
+									<div class="admin-chat-header-row">
+										<span class="admin-chat-title">Chat da Sala</span>
+										<span class={`admin-chat-status ${adminState.value?.chatEnabled ? "active" : "inactive"}`}>
+											{adminState.value?.chatEnabled ? "Ativado" : "Desativado"}
+										</span>
+									</div>
+									<button
+										type="button"
+										class={`btn btn-xs ${adminState.value?.chatEnabled ? "btn-danger" : "btn-primary"}`}
+										onClick={() => toggleAdminChat(!adminState.value?.chatEnabled)}
+									>
+										{adminState.value?.chatEnabled ? "Desativar Chat" : "Ativar Chat"}
+									</button>
+								</div>
 								<div class="admin-seats-list">
 									{(adminState.value?.seats ?? Array.from({ length: PAD_COUNT }, (_, i) => ({ seat: i, occupied: false, muted: false }))).map((s) => (
 										<div key={s.seat} class="admin-seat-row">
@@ -1409,6 +1522,154 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							</div>
 						)}
 					</section>
+				</aside>
+			)}
+
+			{chatOpen.value && (
+				<aside class="play-chat-drawer" onClick={(event) => event.stopPropagation()}>
+					<div class="chat-header">
+						<div class="chat-header-title">
+							<MessageSquare size={16} />
+							<h3>Chat da Sala</h3>
+							<span class={`chat-status-pill ${chatEnabled.value ? "online" : "offline"}`}>
+								{chatEnabled.value ? "Ao Vivo" : "Desativado"}
+							</span>
+						</div>
+						<button
+							type="button"
+							class="btn btn-icon btn-sm"
+							aria-label="Fechar Chat"
+							onClick={() => (chatOpen.value = false)}
+						>
+							<X size={16} />
+						</button>
+					</div>
+
+					<div class="chat-user-bar">
+						{chatEditingNick.value ? (
+							<form
+								class="chat-nick-form"
+								onSubmit={(e) => {
+									e.preventDefault();
+									if (chatNewNickInput.value.trim()) {
+										updateNick(chatNewNickInput.value.trim());
+									}
+								}}
+							>
+								<input
+									type="text"
+									id="chat-new-nick"
+									name="chat-new-nick"
+									autoComplete="off"
+									maxLength={24}
+									value={chatNewNickInput.value}
+									onInput={(e) => (chatNewNickInput.value = (e.target as HTMLInputElement).value)}
+									placeholder="Novo apelido..."
+									autoFocus
+								/>
+								<button type="submit" class="btn btn-xs btn-primary">Salvar</button>
+								<button
+									type="button"
+									class="btn btn-xs"
+									onClick={() => (chatEditingNick.value = false)}
+								>
+									Cancelar
+								</button>
+							</form>
+						) : (
+							<div class="chat-nick-display">
+								<span class="chat-nick-label">Seu Apelido:</span>
+								<span class="chat-current-nick">{chatNick.value || "Visitante"}</span>
+								<button
+									type="button"
+									class="chat-nick-edit-btn"
+									title="Alterar seu apelido"
+									onClick={() => {
+										chatNewNickInput.value = chatNick.value;
+										chatEditingNick.value = true;
+									}}
+								>
+									Alterar
+								</button>
+							</div>
+						)}
+					</div>
+
+					<div class="chat-messages-container">
+						{chatMessages.value.length === 0 ? (
+							<div class="chat-empty">
+								<p>Nenhuma mensagem ainda.</p>
+								<span>Envie uma mensagem ou use <code>/nick &lt;nome&gt;</code> para mudar seu apelido!</span>
+							</div>
+						) : (
+							chatMessages.value.map((m) => {
+								const timeStr = new Date(m.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+								if (m.isSystem) {
+									return (
+										<div key={m.id} class="chat-msg chat-msg-system">
+											<span class="chat-msg-time">{timeStr}</span>
+											<span class="chat-msg-content">{m.text}</span>
+										</div>
+									);
+								}
+								const isMe = m.nick === chatNick.value;
+								const hasSeat = typeof m.seat === "number" && m.seat >= 0 && m.seat < PAD_COUNT;
+								return (
+									<div key={m.id} class={`chat-msg ${isMe ? "chat-msg-me" : ""}`}>
+										<div class="chat-msg-header">
+											<span class="chat-msg-time">{timeStr}</span>
+											{hasSeat && (
+												<span class={`chat-player-badge player-${m.seat! + 1}`}>
+													P{m.seat! + 1}
+												</span>
+											)}
+											{m.isAdmin && (
+												<span class="chat-admin-badge">ADMIN</span>
+											)}
+											<span class="chat-msg-nick">{m.nick}</span>
+										</div>
+										<p class="chat-msg-text">{m.text}</p>
+									</div>
+								);
+							})
+						)}
+						<div ref={chatMessagesEndRef} />
+					</div>
+
+					<form
+						class="chat-input-bar"
+						onSubmit={(e) => {
+							e.preventDefault();
+							sendChatMessage(chatInput.value);
+						}}
+					>
+						<input
+							type="text"
+							id="chat-message-input"
+							name="chat-message-input"
+							autoComplete="off"
+							maxLength={250}
+							disabled={!chatEnabled.value && !adminAuthed.value}
+							placeholder={
+								!chatEnabled.value && !adminAuthed.value
+									? "Chat desativado pelo administrador"
+									: "Digite uma mensagem (ou /nick novo)..."
+							}
+							value={chatInput.value}
+							onInput={(e) => (chatInput.value = (e.target as HTMLInputElement).value)}
+							onKeyDown={(e) => {
+								e.stopPropagation();
+							}}
+						/>
+						<button
+							type="submit"
+							class="btn btn-primary btn-icon chat-send-btn"
+							disabled={(!chatEnabled.value && !adminAuthed.value) || !chatInput.value.trim()}
+							aria-label="Enviar mensagem"
+						>
+							<Send size={15} />
+						</button>
+					</form>
 				</aside>
 			)}
 
