@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -305,8 +305,32 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	function sendChatMessage(text: string): void {
 		const trimmed = text.trim();
 		if (!trimmed) return;
+		if (trimmed === "/clear" || trimmed === "/limpar") {
+			clearChat();
+			chatInput.value = "";
+			return;
+		}
 		send(wsRef.current, { op: "chat_send", text: trimmed });
 		chatInput.value = "";
+	}
+
+	function clearAdminChat(): void {
+		if (confirm("Deseja realmente limpar todo o histórico do chat da sala?")) {
+			send(wsRef.current, { op: "admin_clear_chat" });
+		}
+	}
+
+	function clearChat(): void {
+		if (adminAuthed.value) {
+			clearAdminChat();
+		} else {
+			if (confirm("Deseja limpar as mensagens da sua tela?")) {
+				chatMessages.value = [];
+				chatUnread.value = 0;
+				activeChatToast.value = null;
+				toast("Mensagens locais limpas.");
+			}
+		}
 	}
 
 	function updateNick(newNick: string): void {
@@ -682,6 +706,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						} else {
 							toast(`Erro ao trocar apelido: ${msg.data.error || "inválido"}`);
 						}
+					} else if (msg.op === "chat_cleared") {
+						chatMessages.value = msg.data.history;
+						chatUnread.value = 0;
+						activeChatToast.value = null;
+						toast("O histórico do chat foi limpo pelo administrador.");
 					} else if (msg.op === "chat_status") {
 						chatEnabled.value = msg.data.enabled;
 						toast(msg.data.enabled ? "Chat da sala ativado" : "Chat desativado pelo administrador");
@@ -1656,13 +1685,23 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 											{adminState.value?.chatEnabled ? "Ativado" : "Desativado"}
 										</span>
 									</div>
-									<button
-										type="button"
-										class={`btn btn-xs ${adminState.value?.chatEnabled ? "btn-danger" : "btn-primary"}`}
-										onClick={() => toggleAdminChat(!adminState.value?.chatEnabled)}
-									>
-										{adminState.value?.chatEnabled ? "Desativar Chat" : "Ativar Chat"}
-									</button>
+									<div class="admin-chat-btn-row">
+										<button
+											type="button"
+											class={`btn btn-xs ${adminState.value?.chatEnabled ? "btn-danger" : "btn-primary"}`}
+											onClick={() => toggleAdminChat(!adminState.value?.chatEnabled)}
+										>
+											{adminState.value?.chatEnabled ? "Desativar Chat" : "Ativar Chat"}
+										</button>
+										<button
+											type="button"
+											class="btn btn-xs btn-outline"
+											title="Limpar todo o histórico do chat da sala"
+											onClick={clearAdminChat}
+										>
+											<Trash2 size={12} /> Limpar Histórico
+										</button>
+									</div>
 								</div>
 								<div class="admin-seats-list">
 									{(adminState.value?.seats ?? Array.from({ length: PAD_COUNT }, (_, i) => ({ seat: i, occupied: false, muted: false }))).map((s) => (
@@ -1718,14 +1757,24 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 								{chatEnabled.value ? "Ao Vivo" : "Desativado"}
 							</span>
 						</div>
-						<button
-							type="button"
-							class="btn btn-icon btn-sm"
-							aria-label="Fechar Chat"
-							onClick={() => (chatOpen.value = false)}
-						>
-							<X size={16} />
-						</button>
+						<div class="chat-header-actions">
+							<button
+								type="button"
+								class="btn btn-icon btn-sm chat-clear-btn"
+								title={adminAuthed.value ? "Limpar histórico do chat da sala (Admin)" : "Limpar mensagens da sua tela"}
+								onClick={clearChat}
+							>
+								<Trash2 size={15} />
+							</button>
+							<button
+								type="button"
+								class="btn btn-icon btn-sm"
+								aria-label="Fechar Chat"
+								onClick={() => (chatOpen.value = false)}
+							>
+								<X size={16} />
+							</button>
+						</div>
 					</div>
 
 					<div class="chat-user-bar">

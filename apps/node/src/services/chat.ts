@@ -115,6 +115,10 @@ export function getChatHistory(): ChatMessage[] {
 	return [...messageHistory];
 }
 
+export function clearChatHistory(): void {
+	messageHistory.length = 0;
+}
+
 export function canSend(ws: WebSocket, isAdmin = false): { ok: boolean; reason?: string } {
 	if (!chatEnabled && !isAdmin) {
 		return { ok: false, reason: "chat_disabled" };

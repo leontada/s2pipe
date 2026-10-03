@@ -24,6 +24,7 @@ import {
 } from "@/services/sockets.ts";
 import {
 	canSend,
+	clearChatHistory,
 	createMessage,
 	getChatHistory,
 	getSocketNick,
@@ -230,6 +231,29 @@ function bind(ws: WebSocket): void {
 						return;
 					}
 
+					if (rawText === "/clear" || rawText === "/limpar") {
+						if (isAdmin) {
+							clearChatHistory();
+							const notice = createMessage({
+								text: "O histórico do chat foi limpo pelo administrador.",
+								nick: "Sistema",
+								isSystem: true,
+							});
+							forEachViewer((v) => {
+								send(v, {
+									op: "chat_cleared",
+									data: { history: notice ? [notice] : [] },
+								});
+							});
+						} else {
+							send(ws, {
+								op: "chat_cleared",
+								data: { history: [] },
+							});
+						}
+						return;
+					}
+
 					const senderSeat = padOf(ws);
 					const chatMsg = createMessage({
 						text: rawText,
@@ -357,6 +381,22 @@ function bind(ws: WebSocket): void {
 					});
 					pushAdminState();
 					void pushStatus();
+					return;
+				}
+				case "admin_clear_chat": {
+					if (!adminSockets.has(ws)) return;
+					clearChatHistory();
+					const notice = createMessage({
+						text: "O histórico do chat foi limpo pelo administrador.",
+						nick: "Sistema",
+						isSystem: true,
+					});
+					forEachViewer((v) => {
+						send(v, {
+							op: "chat_cleared",
+							data: { history: notice ? [notice] : [] },
+						});
+					});
 					return;
 				}
 			}
