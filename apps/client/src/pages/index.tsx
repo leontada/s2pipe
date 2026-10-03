@@ -23,7 +23,7 @@ export default {
 	url: "/",
 	template: "app",
 
-	title: "s2pipe",
+	title: "NS2 Arcade",
 
 	styles: ["/styles/play.css"],
 	scripts: [],

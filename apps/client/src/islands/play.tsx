@@ -892,7 +892,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							<div class="turnstile-brand">
 								<span class="turnstile-dot red"></span>
 								<span class="turnstile-dot blue"></span>
-								<h2 class="turnstile-title">s2pipe</h2>
+								<h2 class="turnstile-title">NS2 Arcade</h2>
 							</div>
 							<p class="turnstile-subtitle">Nintendo Switch Remote Play</p>
 						</div>
@@ -973,7 +973,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			<div class="play-hud" onClick={(event) => event.stopPropagation()}>
 				<div class="play-top">
 					<span class="play-brand">
-						<span>s2</span>pipe
+						<span>NS2</span> Arcade
 					</span>
 					<div class="play-slots">
 						<span class="play-count">

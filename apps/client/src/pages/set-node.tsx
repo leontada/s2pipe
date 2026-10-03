@@ -7,7 +7,7 @@ export default {
 	url: "/set-node",
 	template: "app",
 
-	title: "Connect the node | s2pipe",
+	title: "Connect the node | NS2 Arcade",
 
 	styles: ["/styles/set-node.css"],
 	scripts: [],

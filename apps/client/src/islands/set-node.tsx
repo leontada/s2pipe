@@ -46,7 +46,7 @@ export default function SetNode() {
 	return (
 		<article>
 			<p class="brand">
-				<span>s2</span>pipe
+				<span>NS2</span> Arcade
 			</p>
 			<h1>Connect the node</h1>
 			<p>Public URL of the machine running the node. Saved in a cookie on this browser.</p>

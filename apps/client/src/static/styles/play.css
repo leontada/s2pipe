@@ -113,14 +113,18 @@
 
 .play-brand {
 	font-size: var(--text-sm);
-	font-weight: 700;
-	letter-spacing: -0.06em;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
 
 	flex: 1;
 }
 
 .play-brand > span {
 	color: var(--accent);
+	font-weight: 900;
 }
 
 .play-status {
