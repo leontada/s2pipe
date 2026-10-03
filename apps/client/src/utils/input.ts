@@ -227,5 +227,8 @@ export function createInputTracker() {
 }
 
 export const KEYBOARD_HELP = [
-	["Esc", "Settings"],
+	["Esc", "Configurações"],
+	["Delete", "Modo Limpo (Ocultar/Exibir Interface)"],
+	["C", "Abrir / Fechar Chat"],
+	["I / F3", "WebRTC Stats Overlay"],
 ] as const;

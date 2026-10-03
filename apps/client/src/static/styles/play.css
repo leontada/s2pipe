@@ -93,6 +93,26 @@
 	);
 
 	pointer-events: none;
+	transition: background 0.25s ease;
+}
+
+.play-hud.ui-hidden {
+	background: transparent !important;
+}
+
+.play-hud.ui-hidden .play-slots,
+.play-hud.ui-hidden .play-status,
+.play-hud.ui-hidden .play-bottom {
+	opacity: 0 !important;
+	pointer-events: none !important;
+	visibility: hidden !important;
+	transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.play-hud .play-slots,
+.play-hud .play-status,
+.play-hud .play-bottom {
+	transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
 .play-top,
@@ -120,6 +140,43 @@
 	gap: 0.25rem;
 
 	flex: 1;
+}
+
+.play-brand.brand-interactive {
+	appearance: none;
+	-webkit-appearance: none;
+	background: transparent;
+	border: none;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	user-select: none;
+	padding: 0.25rem 0.5rem;
+	margin: -0.25rem -0.5rem;
+	border-radius: var(--radius-sm, 6px);
+	transition: background 0.15s ease, opacity 0.2s ease, transform 0.1s ease;
+	outline: none;
+	pointer-events: auto;
+}
+
+.play-brand.brand-interactive:hover {
+	background: rgb(255 255 255 / 0.1);
+}
+
+.play-brand.brand-interactive:active {
+	transform: scale(0.96);
+}
+
+.play-brand.brand-interactive:focus-visible {
+	box-shadow: 0 0 0 2px var(--accent, #00e699);
+}
+
+.play-hud.ui-hidden .play-brand {
+	opacity: 0.75;
+}
+
+.play-hud.ui-hidden .play-brand:hover {
+	opacity: 1;
 }
 
 .play-brand > span {
@@ -1946,4 +2003,134 @@
 		width: 100%;
 		border-left: 0;
 	}
+}
+
+/* Floating Chat Toast (Nintendo Switch style) */
+.play-chat-toast {
+	position: absolute;
+	top: 1rem;
+	right: 1.25rem;
+	z-index: 40;
+	max-width: min(380px, calc(100vw - 2.5rem));
+	background: rgb(15 18 24 / 0.92);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
+	border: 1px solid rgb(255 255 255 / 0.15);
+	border-left: 3px solid var(--accent, #00e699);
+	border-radius: var(--radius-md, 10px);
+	padding: 0.65rem 0.85rem;
+	box-shadow: 0 12px 32px -4px rgb(0 0 0 / 0.75), 0 0 20px rgb(0 230 153 / 0.12);
+	cursor: pointer;
+	user-select: none;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	animation: chatToastSlide 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+	transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.play-chat-toast:hover {
+	transform: translateY(-2px);
+	border-color: rgb(255 255 255 / 0.28);
+	box-shadow: 0 14px 36px -4px rgb(0 0 0 / 0.85), 0 0 25px rgb(0 230 153 / 0.2);
+}
+
+@keyframes chatToastSlide {
+	from {
+		opacity: 0;
+		transform: translateX(25px) scale(0.96);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0) scale(1);
+	}
+}
+
+.chat-toast-header {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: var(--text-xs);
+	line-height: 1;
+}
+
+.chat-toast-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	color: var(--accent, #00e699);
+	font-weight: 700;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.chat-toast-nick {
+	color: #fff;
+	font-weight: 600;
+	font-size: 0.8rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 130px;
+}
+
+.chat-toast-time {
+	color: rgb(255 255 255 / 0.45);
+	font-size: 0.7rem;
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+.chat-toast-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: none;
+	color: rgb(255 255 255 / 0.4);
+	padding: 2px;
+	border-radius: 4px;
+	cursor: pointer;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-toast-close:hover {
+	color: #fff;
+	background: rgb(255 255 255 / 0.15);
+}
+
+.chat-toast-body {
+	font-size: 0.82rem;
+	color: rgb(255 255 255 / 0.92);
+	line-height: 1.35;
+	word-break: break-word;
+	display: -webkit-box;
+	line-clamp: 2;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/* Settings Controls for Chat Notifications */
+.settings-divider {
+	height: 1px;
+	background: rgb(255 255 255 / 0.1);
+	margin: var(--space-3) 0 var(--space-2) 0;
+}
+
+.settings-subtitle {
+	font-size: var(--text-xs);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--accent, #00e699);
+	font-weight: 700;
+	margin: 0 0 var(--space-2) 0;
+}
+
+.field-header-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
 }

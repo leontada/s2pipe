@@ -56,6 +56,56 @@ function send(ws: WebSocket | null, message: ClientMessage): void {
 	if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
 
+function playChatChime(volume: number): void {
+	if (volume <= 0 || typeof window === "undefined") return;
+	try {
+		const AudioContextClass = globalThis.AudioContext ||
+			(globalThis as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+		if (!AudioContextClass) return;
+		const ctx = new AudioContextClass();
+		if (ctx.state === "suspended") {
+			ctx.resume().catch(() => {});
+		}
+		const now = ctx.currentTime;
+		const masterGain = ctx.createGain();
+		masterGain.gain.setValueAtTime(volume * 0.35, now);
+		masterGain.connect(ctx.destination);
+
+		// Note 1: C6 (1046.5 Hz)
+		const osc1 = ctx.createOscillator();
+		const gain1 = ctx.createGain();
+		osc1.type = "sine";
+		osc1.frequency.setValueAtTime(1046.5, now);
+		gain1.gain.setValueAtTime(0.8, now);
+		gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+		osc1.connect(gain1);
+		gain1.connect(masterGain);
+		osc1.start(now);
+		osc1.stop(now + 0.32);
+
+		// Note 2: G6 (1567.98 Hz) with 0.07s delay
+		const osc2 = ctx.createOscillator();
+		const gain2 = ctx.createGain();
+		osc2.type = "sine";
+		osc2.frequency.setValueAtTime(1567.98, now + 0.07);
+		gain2.gain.setValueAtTime(0.001, now);
+		gain2.gain.setValueAtTime(1.0, now + 0.07);
+		gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.6);
+		osc2.connect(gain2);
+		gain2.connect(masterGain);
+		osc2.start(now + 0.07);
+		osc2.stop(now + 0.6);
+
+		setTimeout(() => {
+			try {
+				ctx.close();
+			} catch {}
+		}, 800);
+	} catch {
+		// Ignore audio autoplay / initialization errors
+	}
+}
+
 function picoTitle(pico: PicoStatus | null): string | undefined {
 	if (!pico) return undefined;
 	if (pico.error) return pico.error;
@@ -151,6 +201,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const adminState = useSignal<AdminState | null>(null);
 	const inputMuted = useSignal(false);
 
+	// UI Visibility signal (Clean View)
+	const uiHidden = useSignal(false);
+
 	// Chat signals
 	const chatOpen = useSignal(false);
 	const chatEnabled = useSignal(true);
@@ -161,6 +214,20 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const chatEditingNick = useSignal(false);
 	const chatNewNickInput = useSignal("");
 	const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+
+	// Chat Toast & Audio signals
+	const chatToastsEnabled = useSignal(true);
+	const chatSoundVolume = useSignal(0.6);
+	const chatToastsOnHidden = useSignal(true);
+	const activeChatToast = useSignal<{
+		id: string;
+		nick: string;
+		text: string;
+		seat?: number;
+		isAdmin?: boolean;
+		time: number;
+	} | null>(null);
+	const chatToastTimer = useRef<number | null>(null);
 
 	useEffect(() => {
 		const prefs = loadPlayPrefs();
@@ -176,6 +243,15 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			touchEnabled.value = prefs.touchEnabled;
 		} else if (hasTouch) {
 			touchEnabled.value = true;
+		}
+		if (typeof prefs.chatToastsEnabled === "boolean") {
+			chatToastsEnabled.value = prefs.chatToastsEnabled;
+		}
+		if (typeof prefs.chatSoundVolume === "number") {
+			chatSoundVolume.value = prefs.chatSoundVolume;
+		}
+		if (typeof prefs.chatToastsOnHidden === "boolean") {
+			chatToastsOnHidden.value = prefs.chatToastsOnHidden;
 		}
 
 		const checkOrientation = () => {
@@ -202,8 +278,21 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			showStats: showStats.value,
 			touchEnabled: touchEnabled.value,
 			touchOpacity: touchOpacity.value,
+			chatToastsEnabled: chatToastsEnabled.value,
+			chatSoundVolume: chatSoundVolume.value,
+			chatToastsOnHidden: chatToastsOnHidden.value,
 		});
-	}, [muted.value, volume.value, fill.value, showStats.value, touchEnabled.value, touchOpacity.value]);
+	}, [
+		muted.value,
+		volume.value,
+		fill.value,
+		showStats.value,
+		touchEnabled.value,
+		touchOpacity.value,
+		chatToastsEnabled.value,
+		chatSoundVolume.value,
+		chatToastsOnHidden.value,
+	]);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -556,8 +645,28 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						chatMessages.value = msg.data.history;
 					} else if (msg.op === "chat_msg") {
 						chatMessages.value = [...chatMessages.value, msg.data];
-						if (!chatOpen.value && !msg.data.isSystem) {
+						if (!chatOpen.value && !msg.data.isSystem && msg.data.nick !== chatNick.value) {
 							chatUnread.value = chatUnread.value + 1;
+							const shouldShowToast = chatToastsEnabled.value && (!uiHidden.value || chatToastsOnHidden.value);
+							if (shouldShowToast) {
+								activeChatToast.value = {
+									id: msg.data.id,
+									nick: msg.data.nick,
+									text: msg.data.text,
+									seat: msg.data.seat,
+									isAdmin: msg.data.isAdmin,
+									time: msg.data.time,
+								};
+								if (chatToastTimer.current) {
+									clearTimeout(chatToastTimer.current);
+								}
+								chatToastTimer.current = window.setTimeout(() => {
+									activeChatToast.value = null;
+								}, 6500);
+							}
+							if (chatSoundVolume.value > 0) {
+								playChatChime(chatSoundVolume.value);
+							}
 						}
 						setTimeout(() => {
 							chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -718,21 +827,32 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		return () => cancelAnimationFrame(frame);
 	}, []);
 
-	// Raccourci Clavier (Échap pour les paramètres)
+	// Raccourci Clavier
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.repeat) return;
 			if (event.code === "Escape") {
 				if (chatOpen.value) {
 					chatOpen.value = false;
+				} else if (uiHidden.value) {
+					uiHidden.value = false;
 				} else {
 					settings.value = !settings.value;
+				}
+			} else if (event.code === "Delete") {
+				const target = event.target as HTMLElement | null;
+				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+				uiHidden.value = !uiHidden.value;
+				if (uiHidden.value) {
+					if (settings.value) settings.value = false;
+					if (chatOpen.value) chatOpen.value = false;
 				}
 			} else if (event.code === "KeyC") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
 				chatOpen.value = !chatOpen.value;
 				if (chatOpen.value) {
+					if (uiHidden.value) uiHidden.value = false;
 					chatUnread.value = 0;
 					if (settings.value) settings.value = false;
 				}
@@ -1021,7 +1141,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				</div>
 			)}
 
-			{showStats.value && (
+			{showStats.value && !uiHidden.value && (
 				<dl class="play-stats">
 					<div>
 						<dt>Ping</dt>
@@ -1046,11 +1166,23 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				</dl>
 			)}
 
-			<div class="play-hud" onClick={(event) => event.stopPropagation()}>
+			<div class={`play-hud ${uiHidden.value ? "ui-hidden" : ""}`} onClick={(event) => event.stopPropagation()}>
 				<div class="play-top">
-					<span class="play-brand">
+					<button
+						type="button"
+						class="play-brand brand-interactive"
+						title={uiHidden.value ? "Restaurar interface (Delete)" : "Ocultar interface (Delete)"}
+						onClick={(e: MouseEvent) => {
+							e.stopPropagation();
+							uiHidden.value = !uiHidden.value;
+							if (uiHidden.value) {
+								if (settings.value) settings.value = false;
+								if (chatOpen.value) chatOpen.value = false;
+							}
+						}}
+					>
 						<span>NS2</span> Arcade
-					</span>
+					</button>
 					<div class="play-slots">
 						<span class="play-count">
 							{occupied.value.length}/{PAD_COUNT} playing
@@ -1261,7 +1393,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			</div>
 
 			<TouchGamepad
-				visible={touchEnabled.value && (seats.value.length > 0 || pads.value.length === 0)}
+				visible={!uiHidden.value && touchEnabled.value && (seats.value.length > 0 || pads.value.length === 0)}
 				opacity={touchOpacity.value}
 			/>
 
@@ -1361,6 +1493,57 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							/>
 						</label>
 					)}
+
+					<div class="settings-divider" />
+					<h3 class="settings-subtitle">Notificações do Chat</h3>
+
+					<label class="play-check" htmlFor="setting-chat-toasts">
+						<input
+							id="setting-chat-toasts"
+							name="chatToastsEnabled"
+							type="checkbox"
+							checked={chatToastsEnabled.value}
+							onChange={(event) => chatToastsEnabled.value = (event.target as HTMLInputElement).checked}
+						/>
+						Pop-up flutuante ao receber mensagens
+					</label>
+
+					{chatToastsEnabled.value && (
+						<label class="play-check" htmlFor="setting-chat-toasts-hidden">
+							<input
+								id="setting-chat-toasts-hidden"
+								name="chatToastsOnHidden"
+								type="checkbox"
+								checked={chatToastsOnHidden.value}
+								onChange={(event) => chatToastsOnHidden.value = (event.target as HTMLInputElement).checked}
+							/>
+							Exibir pop-up mesmo com interface oculta
+						</label>
+					)}
+
+					<div class="field setting-volume-field">
+						<div class="field-header-row">
+							<span>Som de Notificação ({Math.round(chatSoundVolume.value * 100)}%)</span>
+							<button
+								type="button"
+								class="btn btn-xs btn-outline"
+								onClick={() => playChatChime(chatSoundVolume.value || 0.6)}
+								title="Ouvir som de teste"
+							>
+								<Volume2 size={12} /> Testar
+							</button>
+						</div>
+						<input
+							id="setting-chat-sound"
+							name="chatSoundVolume"
+							type="range"
+							min="0"
+							max="1"
+							step="0.05"
+							value={chatSoundVolume.value}
+							onInput={(event) => chatSoundVolume.value = Number((event.target as HTMLInputElement).value)}
+						/>
+					</div>
 
 					<section class="play-help">
 						<h3>Gamepad</h3>
@@ -1719,8 +1902,62 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				</div>
 			)}
 
+			{activeChatToast.value && (!uiHidden.value || chatToastsOnHidden.value) && (
+				<div
+					class="play-chat-toast"
+					role="alert"
+					onMouseEnter={() => {
+						if (chatToastTimer.current) clearTimeout(chatToastTimer.current);
+					}}
+					onMouseLeave={() => {
+						chatToastTimer.current = window.setTimeout(() => {
+							activeChatToast.value = null;
+						}, 3500);
+					}}
+					onClick={() => {
+						if (uiHidden.value) uiHidden.value = false;
+						chatOpen.value = true;
+						chatUnread.value = 0;
+						activeChatToast.value = null;
+					}}
+				>
+					<div class="chat-toast-header">
+						<span class="chat-toast-tag">
+							<MessageSquare size={13} aria-hidden="true" />
+							Chat
+						</span>
+						{typeof activeChatToast.value.seat === "number" && activeChatToast.value.seat >= 0 && activeChatToast.value.seat < PAD_COUNT && (
+							<span class={`chat-player-badge player-${activeChatToast.value.seat + 1}`}>
+								P{activeChatToast.value.seat + 1}
+							</span>
+						)}
+						{activeChatToast.value.isAdmin && (
+							<span class="chat-admin-badge">ADMIN</span>
+						)}
+						<strong class="chat-toast-nick">{activeChatToast.value.nick}</strong>
+						<span class="chat-toast-time">
+							{new Date(activeChatToast.value.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+						</span>
+						<button
+							type="button"
+							class="chat-toast-close"
+							aria-label="Fechar notificação"
+							onClick={(e) => {
+								e.stopPropagation();
+								activeChatToast.value = null;
+							}}
+						>
+							<X size={13} />
+						</button>
+					</div>
+					<div class="chat-toast-body">
+						{activeChatToast.value.text}
+					</div>
+				</div>
+			)}
+
 			<ul class="play-toasts" aria-live="polite">
-				{toasts.value.map((item) => <li key={item.id}>{item.text}</li>)}
+				{toasts.value.map((item: { id: number; text: string }) => <li key={item.id}>{item.text}</li>)}
 			</ul>
 		</section>
 	);
