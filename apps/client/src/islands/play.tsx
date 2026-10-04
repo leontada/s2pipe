@@ -15,6 +15,7 @@ import {
 	TOUCH_INDEX,
 } from "../utils/input.ts";
 import TouchGamepad from "../components/touch-gamepad.tsx";
+import StealthTerminal from "../components/stealth-terminal.tsx";
 import {
 	type AudioWhepHandle,
 	onWhepDead,
@@ -208,9 +209,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	// UI Visibility signal (Clean View)
 	const uiHidden = useSignal(false);
 
-	// Privacy & Standby signals
+	// Privacy, Standby & Stealth signals
 	const privacyMode = useSignal(false);
 	const switchStandby = useSignal(false);
+	const stealthMode = useSignal(false);
 
 	// Chat signals
 	const chatOpen = useSignal(false);
@@ -847,7 +849,18 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				lastAssignedKey = assignedKey;
 			}
 
-			if (inputMuted.value) return;
+			if (inputMuted.value || stealthMode.value) {
+				// Ao pausar ou camuflar, reseta inputs ativos para neutralizar no Switch
+				for (let i = 0; i < assigned.length; i++) {
+					const seat = assigned[i]!;
+					const previous = lastBySeat.get(seat);
+					if (previous && !samePad(previous, NEUTRAL)) {
+						lastBySeat.set(seat, NEUTRAL);
+						send(ws, { op: "pad", data: NEUTRAL, seat });
+					}
+				}
+				return;
+			}
 
 			const currentChosen = chosen.value;
 			for (let i = 0; i < assigned.length; i++) {
@@ -881,6 +894,20 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.repeat) return;
+
+			// Atalho Secreto (Boss Key / Modo Camuflagem: Ctrl+Alt+Shift+B)
+			if (event.ctrlKey && event.altKey && event.shiftKey && event.code === "KeyB") {
+				event.preventDefault();
+				event.stopPropagation();
+				if (!stealthMode.value) {
+					stealthMode.value = true;
+				}
+				return;
+			}
+
+			// Se camuflado, ignorar qualquer outro atalho do sistema
+			if (stealthMode.value) return;
+
 			if (event.code === "Escape") {
 				if (chatOpen.value) {
 					chatOpen.value = false;
@@ -923,19 +950,23 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		return () => globalThis.removeEventListener("keydown", onKey);
 	}, []);
 
-	// Synchro Volume / Mute (Mutando para o público em Modo Privacidade)
+	// Synchro Volume / Mute (Mutando para o público em Modo Privacidade e Mudo total em Modo Camuflagem)
 	useEffect(() => {
 		if (videoRef.current) videoRef.current.muted = true;
 		const audio = audioRef.current?.audio;
 		if (!audio) return;
-		const isPrivateForMe = privacyMode.value && !adminAuthed.value;
-		if (isPrivateForMe) {
+		if (stealthMode.value) {
 			audio.muted = true;
 		} else {
-			audio.muted = muted.value;
-			audio.volume = volume.value;
+			const isPrivateForMe = privacyMode.value && !adminAuthed.value;
+			if (isPrivateForMe) {
+				audio.muted = true;
+			} else {
+				audio.muted = muted.value;
+				audio.volume = volume.value;
+			}
 		}
-	}, [muted.value, volume.value, live.value, privacyMode.value, adminAuthed.value]);
+	}, [muted.value, volume.value, live.value, privacyMode.value, adminAuthed.value, stealthMode.value]);
 
 	// Detecção inteligente de Standby / Console em Repouso
 	useEffect(() => {
@@ -949,6 +980,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		const BLACK_STANDBY_MAX_TICKS = 60;
 
 		const timer = globalThis.setInterval(() => {
+			if (stealthMode.value) return;
 			if (privacyMode.value) {
 				blackStreak = 0;
 				if (switchStandby.value) switchStandby.value = false;
@@ -2257,6 +2289,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			<ul class="play-toasts" aria-live="polite">
 				{toasts.value.map((item: { id: number; text: string }) => <li key={item.id}>{item.text}</li>)}
 			</ul>
+
+			{/* Modo Camuflagem (Boss Key / Terminal de Diagnóstico Falso) */}
+			{stealthMode.value && (
+				<StealthTerminal onExit={() => (stealthMode.value = false)} />
+			)}
 		</section>
 	);
 }
