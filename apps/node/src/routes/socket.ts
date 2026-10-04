@@ -33,13 +33,14 @@ import {
 	setChatEnabled,
 	setSocketNick,
 } from "@/services/chat.ts";
-import { PadButton } from "@s2pipe/shared/types/pad";
+import { PAD_COUNT, PadButton } from "@s2pipe/shared/types/pad";
 import type { ClientMessage, ServerMessage } from "@s2pipe/shared/types/node";
 
 const HEARTBEAT_INTERVAL = 30_000;
 const adminSockets = new Set<WebSocket>();
 
 let lastCapture = "";
+let privacyMode = false;
 
 function send(ws: WebSocket, message: ServerMessage): void {
 	if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -53,6 +54,7 @@ function pushAdminState(targetWs?: WebSocket): void {
 			seats: getSeatStates(),
 			allMuted: isAllMuted(),
 			chatEnabled: isChatEnabled(),
+			privacyMode,
 		},
 	};
 	if (targetWs) {
@@ -77,6 +79,7 @@ async function currentStatus(): Promise<ServerMessage> {
 			viewers: viewerCount(),
 			pinRequired: Boolean(config.playerPin),
 			chatEnabled: isChatEnabled(),
+			privacyMode,
 		},
 	};
 }
@@ -173,7 +176,7 @@ function bind(ws: WebSocket): void {
 				}
 				case "pad": {
 					const seat = typeof msg.seat === "number" ? msg.seat : padOf(ws);
-					if (seat !== undefined && ownsSeat(ws, seat) && !isSeatMuted(seat)) {
+					if (seat !== undefined && ownsSeat(ws, seat) && !isSeatMuted(seat) && !privacyMode) {
 						setPad(seat, {
 							...msg.data,
 							buttons: msg.data.buttons & ~(PadButton.Home | PadButton.Capture),
@@ -201,6 +204,34 @@ function bind(ws: WebSocket): void {
 					}
 					const rawText = msg.text?.trim() || "";
 					if (!rawText) return;
+
+					if (rawText === "/censura" || rawText === "/privacidade" || rawText === "/privacy") {
+						if (isAdmin) {
+							privacyMode = !privacyMode;
+							if (privacyMode) {
+								for (let i = 0; i < PAD_COUNT; i++) {
+									clearPad(i);
+								}
+							}
+							forEachViewer((v) => {
+								send(v, { op: "privacy_status", data: { enabled: privacyMode } });
+							});
+							pushAdminState();
+							void pushStatus();
+						} else {
+							send(ws, {
+								op: "chat_msg",
+								data: {
+									id: crypto.randomUUID(),
+									nick: "Sistema",
+									text: "Comando exclusivo para administradores.",
+									time: Date.now(),
+									isSystem: true,
+								},
+							});
+						}
+						return;
+					}
 
 					// Command /nick [novo_nome]
 					if (rawText.startsWith("/nick ")) {
@@ -397,6 +428,21 @@ function bind(ws: WebSocket): void {
 							data: { history: notice ? [notice] : [] },
 						});
 					});
+					return;
+				}
+				case "admin_toggle_privacy": {
+					if (!adminSockets.has(ws)) return;
+					privacyMode = Boolean(msg.enabled);
+					if (privacyMode) {
+						for (let i = 0; i < PAD_COUNT; i++) {
+							clearPad(i);
+						}
+					}
+					forEachViewer((v) => {
+						send(v, { op: "privacy_status", data: { enabled: privacyMode } });
+					});
+					pushAdminState();
+					void pushStatus();
 					return;
 				}
 			}

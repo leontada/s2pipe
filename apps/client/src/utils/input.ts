@@ -230,5 +230,6 @@ export const KEYBOARD_HELP = [
 	["Esc", "Configurações"],
 	["Delete", "Modo Limpo (Ocultar/Exibir Interface)"],
 	["C", "Abrir / Fechar Chat"],
+	["P", "Modo Privacidade (Admin)"],
 	["I / F3", "WebRTC Stats Overlay"],
 ] as const;

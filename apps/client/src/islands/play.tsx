@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, EyeOff, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -204,6 +204,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	// UI Visibility signal (Clean View)
 	const uiHidden = useSignal(false);
 
+	// Privacy & Standby signals
+	const privacyMode = useSignal(false);
+	const switchStandby = useSignal(false);
+
 	// Chat signals
 	const chatOpen = useSignal(false);
 	const chatEnabled = useSignal(true);
@@ -341,6 +345,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	function toggleAdminChat(enabled: boolean): void {
 		send(wsRef.current, { op: "admin_toggle_chat", enabled });
+	}
+
+	function toggleAdminPrivacy(enabled: boolean): void {
+		send(wsRef.current, { op: "admin_toggle_privacy", enabled });
 	}
 
 	// Cloudflare Turnstile Gatekeeper com Resiliência Anti-Bloqueador
@@ -611,6 +619,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						if (typeof msg.data.pinRequired === "boolean") {
 							pinRequired.value = msg.data.pinRequired;
 						}
+						if (typeof msg.data.privacyMode === "boolean") {
+							privacyMode.value = msg.data.privacyMode;
+						}
 					} else if (msg.op === "admin_auth") {
 						if (msg.data.ok) {
 							adminAuthed.value = true;
@@ -631,6 +642,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						adminState.value = msg.data;
 						if (typeof msg.data.viewers === "number") {
 							viewersCount.value = msg.data.viewers;
+						}
+						if (typeof msg.data.privacyMode === "boolean") {
+							privacyMode.value = msg.data.privacyMode;
 						}
 					} else if (msg.op === "input_status") {
 						if (inputMuted.value !== msg.data.muted) {
@@ -714,6 +728,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					} else if (msg.op === "chat_status") {
 						chatEnabled.value = msg.data.enabled;
 						toast(msg.data.enabled ? "Chat da sala ativado" : "Chat desativado pelo administrador");
+					} else if (msg.op === "privacy_status") {
+						privacyMode.value = msg.data.enabled;
+						toast(msg.data.enabled ? "🔒 Modo Privacidade ativado pelo Administrador." : "🔓 Modo Privacidade desativado.");
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -885,6 +902,13 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					chatUnread.value = 0;
 					if (settings.value) settings.value = false;
 				}
+			} else if (event.code === "KeyP") {
+				const target = event.target as HTMLElement | null;
+				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+				if (adminAuthed.value) {
+					event.preventDefault();
+					toggleAdminPrivacy(!privacyMode.value);
+				}
 			} else if (event.code === "KeyI" || event.code === "F3") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
@@ -895,14 +919,66 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		return () => globalThis.removeEventListener("keydown", onKey);
 	}, []);
 
-	// Synchro Volume / Mute
+	// Synchro Volume / Mute (Mutando para o público em Modo Privacidade)
 	useEffect(() => {
 		if (videoRef.current) videoRef.current.muted = true;
 		const audio = audioRef.current?.audio;
 		if (!audio) return;
-		audio.muted = muted.value;
-		audio.volume = volume.value;
-	}, [muted.value, volume.value, live.value]);
+		const isPrivateForMe = privacyMode.value && !adminAuthed.value;
+		if (isPrivateForMe) {
+			audio.muted = true;
+		} else {
+			audio.muted = muted.value;
+			audio.volume = volume.value;
+		}
+	}, [muted.value, volume.value, live.value, privacyMode.value, adminAuthed.value]);
+
+	// Detecção inteligente de Standby / Console em Repouso via amostragem esparsa
+	useEffect(() => {
+		let canvas: HTMLCanvasElement | null = null;
+		let ctx: CanvasRenderingContext2D | null = null;
+		let blackStreak = 0;
+
+		const timer = globalThis.setInterval(() => {
+			const video = videoRef.current;
+			if (!video || !live.value || privacyMode.value || video.readyState < 2) {
+				blackStreak = 0;
+				if (switchStandby.value) switchStandby.value = false;
+				return;
+			}
+			try {
+				if (!canvas) {
+					canvas = document.createElement("canvas");
+					canvas.width = 4;
+					canvas.height = 4;
+					ctx = canvas.getContext("2d", { willReadFrequently: true });
+				}
+				if (!ctx) return;
+				ctx.drawImage(video, 0, 0, 4, 4);
+				const imgData = ctx.getImageData(0, 0, 4, 4).data;
+				let maxLum = 0;
+				for (let i = 0; i < imgData.length; i += 4) {
+					const lum = (imgData[i]! + imgData[i + 1]! + imgData[i + 2]!) / 3;
+					if (lum > maxLum) maxLum = lum;
+				}
+				if (maxLum < 6) {
+					blackStreak++;
+					if (blackStreak >= 2) {
+						switchStandby.value = true;
+					}
+				} else {
+					blackStreak = 0;
+					if (switchStandby.value) {
+						switchStandby.value = false;
+					}
+				}
+			} catch {
+				// Ignora se indisponível
+			}
+		}, 2500);
+
+		return () => clearInterval(timer);
+	}, [isTurnstilePassed]);
 
 	// Récupération des stats du flux
 	useEffect(() => {
@@ -1158,10 +1234,110 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				autoplay
 				muted
 				playsInline
+				class={privacyMode.value && !adminAuthed.value ? "video-privacy-hidden" : undefined}
 				onPlaying={() => {
 					live.value = true;
 				}}
 			/>
+
+			{/* Admin Privacy Banner (Admin can still see the console feed, but gets a clear warning bar) */}
+			{adminAuthed.value && privacyMode.value && (
+				<div class="admin-privacy-banner">
+					<div class="admin-privacy-banner-content">
+						<EyeOff size={16} class="admin-privacy-banner-icon" />
+						<span class="admin-privacy-banner-text">
+							<strong>MODO PRIVACIDADE ATIVO:</strong> O público está vendo a tela de censura e o áudio dos espectadores está mutado.
+						</span>
+					</div>
+					<button
+						type="button"
+						class="btn btn-xs btn-warn admin-privacy-banner-btn"
+						onClick={() => toggleAdminPrivacy(false)}
+						title="Desativar Modo Privacidade (Tecla P)"
+					>
+						Desativar (P)
+					</button>
+				</div>
+			)}
+
+			{/* Spectator Privacy Overlay */}
+			{privacyMode.value && !adminAuthed.value && (
+				<div class="play-privacy-overlay">
+					<div class="privacy-card">
+						<div class="privacy-shield-container">
+							<div class="privacy-shield-glow"></div>
+							<div class="privacy-shield-icon">
+								<EyeOff size={42} />
+							</div>
+						</div>
+						<h2 class="privacy-title">Transmissão em Pausa Privada</h2>
+						<p class="privacy-subtitle">
+							O administrador pausou a transmissão para configuração segura do console ou troca de credenciais.
+						</p>
+						<div class="privacy-badge">
+							<span class="privacy-dot"></span>
+							<span>Retornando em instantes...</span>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Standby / Sleep Screen (When Switch is sleeping or video signal is dark) */}
+			{switchStandby.value && !privacyMode.value && (
+				<div class="play-standby-overlay">
+					<div class="standby-card">
+						<div class="standby-dock-art">
+							<div class="dock-zzz-container">
+								<span class="dock-zzz z1">Z</span>
+								<span class="dock-zzz z2">z</span>
+								<span class="dock-zzz z3">z</span>
+							</div>
+							<div class="dock-console">
+								<div class="dock-screen-bezel">
+									<div class="dock-screen-content">
+										<div class="dock-screen-glow"></div>
+									</div>
+								</div>
+								<div class="dock-base">
+									<div class="dock-cutout"></div>
+									<div class="dock-led-container" title="Modo Repouso">
+										<span class="dock-led-pulse"></span>
+										<span class="dock-led-core"></span>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<h2 class="standby-title">Nintendo Switch em Repouso</h2>
+						<p class="standby-subtitle">
+							O console está em modo de suspensão / aguardando ativação.
+						</p>
+
+						{adminAuthed.value ? (
+							<div class="standby-admin-box">
+								<button
+									type="button"
+									class="btn btn-primary standby-wake-btn"
+									onClick={() => {
+										sendAdminWake();
+										sendAdminHome();
+									}}
+								>
+									<Zap size={16} /> Acordar Console (Admin)
+								</button>
+								<span class="standby-admin-note">
+									Beacon BLE + Botão Home transmitidos ao console
+								</span>
+							</div>
+						) : (
+							<div class="standby-spectator-badge">
+								<span class="standby-pulse-dot"></span>
+								<span>Aguardando administrador ou jogador acordar o Switch...</span>
+							</div>
+						)}
+					</div>
+				</div>
+			)}
 
 			{banner && (
 				<div class="play-banner">
@@ -1677,6 +1853,31 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 											Kick All
 										</button>
 									</div>
+								</div>
+								<div class="admin-privacy-box">
+									<div class="admin-privacy-header-row">
+										<span class="admin-privacy-title">
+											<Shield size={13} style="vertical-align: -2px; margin-right: 4px;" />
+											Modo Privacidade / Censura
+										</span>
+										<span class={`admin-privacy-status ${privacyMode.value ? "active" : "inactive"}`}>
+											{privacyMode.value ? "ATIVO (Oculto)" : "Desativado"}
+										</span>
+									</div>
+									<div class="admin-privacy-btn-row">
+										<button
+											type="button"
+											class={`btn btn-xs ${privacyMode.value ? "btn-warn" : "btn-danger"}`}
+											onClick={() => toggleAdminPrivacy(!privacyMode.value)}
+											title="Pausa a transmissão pública e silencia o áudio dos espectadores (Atalho: Tecla P)"
+										>
+											<EyeOff size={12} />
+											{privacyMode.value ? "Desativar Modo Privacidade (P)" : "Ativar Modo Privacidade (P)"}
+										</button>
+									</div>
+									<p class="admin-privacy-hint">
+										Dica: Você também pode usar a tecla de atalho <strong>P</strong> ou o comando <strong>/censura</strong> no chat.
+									</p>
 								</div>
 								<div class="admin-chat-box">
 									<div class="admin-chat-header-row">

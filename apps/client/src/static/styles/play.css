@@ -2156,3 +2156,498 @@
 	justify-content: space-between;
 	width: 100%;
 }
+
+/* ==========================================================================
+   Modo Privacidade / Censura (Item 3) & Detecção de Standby
+   ========================================================================== */
+
+/* Esconder vídeo suavemente durante o Modo Privacidade para espectadores */
+.video-privacy-hidden {
+	opacity: 0 !important;
+	filter: blur(20px) brightness(0.1) !important;
+	pointer-events: none !important;
+}
+
+/* Banner de Alerta para o Administrador */
+.admin-privacy-banner {
+	position: absolute;
+	top: var(--space-3);
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 60;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding: 8px 16px;
+	background: rgba(28, 8, 12, 0.92);
+	border: 1px solid rgba(255, 92, 110, 0.6);
+	box-shadow: 0 4px 20px rgba(255, 92, 110, 0.25), 0 0 10px rgba(0, 0, 0, 0.5);
+	border-radius: var(--radius);
+	backdrop-filter: blur(12px);
+	color: #fff;
+	max-width: 90%;
+	animation: slideDownBanner 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDownBanner {
+	from {
+		opacity: 0;
+		transform: translate(-50%, -20px);
+	}
+	to {
+		opacity: 1;
+		transform: translate(-50%, 0);
+	}
+}
+
+.admin-privacy-banner-content {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.admin-privacy-banner-icon {
+	color: var(--danger, #ff5c6e);
+	flex-shrink: 0;
+	animation: pulseDanger 2s infinite ease-in-out;
+}
+
+@keyframes pulseDanger {
+	0%, 100% { opacity: 1; transform: scale(1); }
+	50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+.admin-privacy-banner-text {
+	font-size: var(--text-xs);
+	color: rgba(255, 255, 255, 0.9);
+}
+
+.admin-privacy-banner-btn {
+	flex-shrink: 0;
+}
+
+/* Overlay de Privacidade para Espectadores */
+.play-privacy-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 45;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: radial-gradient(circle at center, rgba(32, 12, 18, 0.94) 0%, rgba(10, 8, 14, 0.98) 100%);
+	backdrop-filter: blur(28px);
+	animation: fadeInOverlay 0.35s ease-out;
+	padding: var(--space-4);
+}
+
+@keyframes fadeInOverlay {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+.privacy-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	background: rgba(20, 22, 30, 0.85);
+	border: 1px solid rgba(255, 92, 110, 0.35);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(255, 92, 110, 0.15);
+	border-radius: 16px;
+	padding: 2.2rem 2.5rem;
+	max-width: 440px;
+	width: 100%;
+}
+
+.privacy-shield-container {
+	position: relative;
+	width: 72px;
+	height: 72px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin-bottom: var(--space-3);
+}
+
+.privacy-shield-glow {
+	position: absolute;
+	inset: -8px;
+	border-radius: 50%;
+	background: radial-gradient(circle, rgba(255, 92, 110, 0.4) 0%, transparent 70%);
+	animation: glowPulse 2.5s infinite alternate ease-in-out;
+}
+
+@keyframes glowPulse {
+	from { transform: scale(0.9); opacity: 0.5; }
+	to { transform: scale(1.15); opacity: 0.9; }
+}
+
+.privacy-shield-icon {
+	position: relative;
+	width: 64px;
+	height: 64px;
+	border-radius: 50%;
+	background: linear-gradient(135deg, rgba(255, 92, 110, 0.25) 0%, rgba(35, 15, 20, 0.6) 100%);
+	border: 2px solid rgba(255, 92, 110, 0.6);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #ff5c6e;
+}
+
+.privacy-title {
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: #fff;
+	margin: 0 0 var(--space-2) 0;
+	letter-spacing: -0.01em;
+}
+
+.privacy-subtitle {
+	font-size: var(--text-sm);
+	color: rgba(255, 255, 255, 0.72);
+	line-height: 1.5;
+	margin: 0 0 var(--space-4) 0;
+}
+
+.privacy-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	background: rgba(255, 255, 255, 0.08);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 9999px;
+	padding: 6px 14px;
+	font-size: var(--text-xs);
+	color: rgba(255, 255, 255, 0.85);
+}
+
+.privacy-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #ff5c6e;
+	box-shadow: 0 0 8px #ff5c6e;
+	animation: pulseDanger 1.5s infinite;
+}
+
+/* Standby / Sleep Screen */
+.play-standby-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 40;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: radial-gradient(circle at center, rgba(14, 20, 32, 0.94) 0%, rgba(6, 9, 16, 0.98) 100%);
+	backdrop-filter: blur(24px);
+	animation: fadeInOverlay 0.4s ease-out;
+	padding: var(--space-4);
+}
+
+.standby-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	background: rgba(16, 22, 34, 0.85);
+	border: 1px solid rgba(0, 180, 216, 0.25);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 0 35px rgba(0, 180, 216, 0.12);
+	border-radius: 18px;
+	padding: 2.2rem 2.5rem;
+	max-width: 440px;
+	width: 100%;
+}
+
+/* Arte Estilizada da Dock do Switch */
+.standby-dock-art {
+	position: relative;
+	width: 140px;
+	height: 105px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	margin-bottom: var(--space-3);
+}
+
+/* Zzz Flutuantes */
+.dock-zzz-container {
+	position: absolute;
+	top: -12px;
+	right: 15px;
+	display: flex;
+	gap: 4px;
+	pointer-events: none;
+}
+
+.dock-zzz {
+	font-family: monospace;
+	font-weight: 800;
+	color: #00b4d8;
+	opacity: 0;
+	animation: floatZzz 3s infinite ease-in;
+}
+
+.dock-zzz.z1 {
+	font-size: 1.1rem;
+	animation-delay: 0s;
+}
+
+.dock-zzz.z2 {
+	font-size: 0.85rem;
+	animation-delay: 0.9s;
+}
+
+.dock-zzz.z3 {
+	font-size: 0.65rem;
+	animation-delay: 1.8s;
+}
+
+@keyframes floatZzz {
+	0% {
+		opacity: 0;
+		transform: translate(0, 8px) scale(0.6);
+	}
+	40% {
+		opacity: 0.9;
+		transform: translate(6px, -8px) scale(1);
+	}
+	80% {
+		opacity: 0.4;
+		transform: translate(14px, -22px) scale(1.15);
+	}
+	100% {
+		opacity: 0;
+		transform: translate(18px, -28px) scale(1.2);
+	}
+}
+
+/* Console Switch na Dock */
+.dock-console {
+	position: relative;
+	width: 110px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.dock-screen-bezel {
+	width: 86px;
+	height: 38px;
+	background: #0d1117;
+	border-top-left-radius: 8px;
+	border-top-right-radius: 8px;
+	border: 2px solid #2d3748;
+	border-bottom: none;
+	position: relative;
+	overflow: hidden;
+}
+
+.dock-screen-content {
+	width: 100%;
+	height: 100%;
+	position: relative;
+}
+
+.dock-screen-glow {
+	position: absolute;
+	inset: 0;
+	background: radial-gradient(circle at center bottom, rgba(0, 180, 216, 0.25) 0%, transparent 80%);
+}
+
+.dock-base {
+	width: 110px;
+	height: 48px;
+	background: linear-gradient(180deg, #1f2533 0%, #151922 100%);
+	border: 2px solid #2d3748;
+	border-radius: 10px;
+	position: relative;
+	box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.dock-cutout {
+	width: 60px;
+	height: 5px;
+	background: #0f1218;
+	border-radius: 3px;
+	position: absolute;
+	top: 6px;
+}
+
+.dock-led-container {
+	position: absolute;
+	bottom: 8px;
+	left: 14px;
+	width: 8px;
+	height: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.dock-led-pulse {
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: rgba(0, 230, 153, 0.45);
+	animation: pulseLed 2s infinite ease-in-out;
+}
+
+.dock-led-core {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: #00e699;
+	box-shadow: 0 0 6px #00e699;
+}
+
+@keyframes pulseLed {
+	0%, 100% {
+		transform: scale(0.8);
+		opacity: 0.4;
+	}
+	50% {
+		transform: scale(1.4);
+		opacity: 0.9;
+	}
+}
+
+.standby-title {
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: #fff;
+	margin: 0 0 var(--space-2) 0;
+	letter-spacing: -0.01em;
+}
+
+.standby-subtitle {
+	font-size: var(--text-sm);
+	color: rgba(255, 255, 255, 0.72);
+	line-height: 1.5;
+	margin: 0 0 var(--space-4) 0;
+}
+
+.standby-admin-box {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+}
+
+.standby-wake-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	width: 100%;
+	padding: 10px 18px;
+	font-weight: 700;
+	font-size: var(--text-sm);
+	background: linear-gradient(135deg, #00b4d8 0%, #0077b6 100%);
+	border-color: rgba(0, 180, 216, 0.6);
+	box-shadow: 0 4px 15px rgba(0, 180, 216, 0.35);
+	cursor: pointer;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.standby-wake-btn:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 6px 20px rgba(0, 180, 216, 0.5);
+}
+
+.standby-admin-note {
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.5);
+}
+
+.standby-spectator-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	background: rgba(255, 255, 255, 0.08);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 9999px;
+	padding: 6px 14px;
+	font-size: var(--text-xs);
+	color: rgba(255, 255, 255, 0.85);
+}
+
+.standby-pulse-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #00b4d8;
+	box-shadow: 0 0 8px #00b4d8;
+	animation: pulseStandbyDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseStandbyDot {
+	0%, 100% { opacity: 0.5; transform: scale(0.9); }
+	50% { opacity: 1; transform: scale(1.2); }
+}
+
+/* Painel do Admin: Caixa de Modo Privacidade */
+.admin-privacy-box {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	background: var(--elevated);
+	border-radius: var(--radius);
+	border: 1px solid rgba(255, 92, 110, 0.3);
+	margin-top: var(--space-2);
+}
+
+.admin-privacy-header-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.admin-privacy-title {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: #fff;
+	display: flex;
+	align-items: center;
+}
+
+.admin-privacy-status {
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	padding: 2px 6px;
+	border-radius: 3px;
+}
+
+.admin-privacy-status.active {
+	background: rgba(255, 92, 110, 0.2);
+	color: var(--danger);
+	border: 1px solid rgba(255, 92, 110, 0.4);
+}
+
+.admin-privacy-status.inactive {
+	background: rgba(255, 255, 255, 0.08);
+	color: rgba(255, 255, 255, 0.6);
+}
+
+.admin-privacy-btn-row {
+	display: flex;
+	gap: var(--space-2);
+	align-items: center;
+}
+
+.admin-privacy-hint {
+	font-size: 0.75rem;
+	color: rgba(255, 255, 255, 0.55);
+	margin: 0;
+	line-height: 1.35;
+}
+

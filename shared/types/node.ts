@@ -21,6 +21,7 @@ export type StatusData = {
 	viewers?: number;
 	pinRequired?: boolean;
 	chatEnabled?: boolean;
+	privacyMode?: boolean;
 };
 
 export type NodeStatus = {
@@ -39,6 +40,7 @@ export type AdminState = {
 	seats: SeatInfo[];
 	allMuted: boolean;
 	chatEnabled: boolean;
+	privacyMode: boolean;
 };
 
 export type ChatMessage = {
@@ -65,6 +67,7 @@ export type ClientMessage =
 	| { op: "admin_home" }
 	| { op: "admin_toggle_chat"; enabled: boolean }
 	| { op: "admin_clear_chat" }
+	| { op: "admin_toggle_privacy"; enabled: boolean }
 	| { op: "chat_send"; text: string }
 	| { op: "chat_nick"; nick: string };
 
@@ -81,4 +84,5 @@ export type ServerMessage =
 	| { op: "chat_msg"; data: ChatMessage }
 	| { op: "chat_nick_ack"; data: { nick: string; success: boolean; error?: string } }
 	| { op: "chat_status"; data: { enabled: boolean } }
-	| { op: "chat_cleared"; data: { history: ChatMessage[] } };
+	| { op: "chat_cleared"; data: { history: ChatMessage[] } }
+	| { op: "privacy_status"; data: { enabled: boolean } };
