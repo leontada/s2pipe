@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, EyeOff, Gamepad2, Home, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, Eye, EyeOff, Gamepad2, Home, Keyboard, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -25,7 +25,17 @@ import {
 	type StreamStats,
 	type WhepHandle,
 } from "../utils/whep.ts";
+import { holdPage } from "../utils/page-session.ts";
 import { loadPlayPrefs, savePlayPrefs } from "../utils/prefs.ts";
+import {
+	createVirtualPad,
+	defaultVirtualPrefs,
+	loadVirtualPrefs,
+	saveVirtualPrefs,
+	VIRTUAL_PREFS_KEY,
+	type VirtualPad,
+	type VirtualPrefs,
+} from "../utils/virtual/mod.ts";
 import { turnstileSiteKey as getTurnstileSiteKey } from "../client.ts";
 
 type Props = {
@@ -163,6 +173,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const audioRef = useRef<AudioWhepHandle | null>(null);
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<ReturnType<typeof createInputTracker> | null>(null);
+	const virtualRef = useRef<VirtualPad | null>(null);
+	const persistVirtual = useRef(false);
 	const statsPrev = useRef<{ bytes: number; at: number } | null>(null);
 	const toastSeq = useRef(0);
 	const playRequested = useRef(false);
@@ -181,6 +193,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const livePads = useSignal<number[]>([]);
 	const source = useSignal<InputSource | null>(null);
 	const settings = useSignal(false);
+	const virtualPrefs = useSignal<VirtualPrefs>(defaultVirtualPrefs());
+	const virtualLive = useSignal(false);
 	const muted = useSignal(false);
 	const volume = useSignal(1);
 	const fill = useSignal(false);
@@ -263,6 +277,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		if (typeof prefs.chatToastsOnHidden === "boolean") {
 			chatToastsOnHidden.value = prefs.chatToastsOnHidden;
 		}
+		virtualPrefs.value = loadVirtualPrefs();
 
 		const checkOrientation = () => {
 			isPortrait.value = window.innerHeight > window.innerWidth;
@@ -303,6 +318,30 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		chatSoundVolume.value,
 		chatToastsOnHidden.value,
 	]);
+
+	useEffect(() => {
+		if (!persistVirtual.current) {
+			persistVirtual.current = true;
+			return;
+		}
+		saveVirtualPrefs(virtualPrefs.value);
+	}, [virtualPrefs.value]);
+
+	useEffect(() => {
+		const onStorage = (event: StorageEvent) => {
+			if (event.key !== VIRTUAL_PREFS_KEY) return;
+			const next = loadVirtualPrefs();
+			virtualPrefs.value = { ...next, enabled: virtualPrefs.value.enabled };
+		};
+		globalThis.addEventListener("storage", onStorage);
+		return holdPage(() => globalThis.removeEventListener("storage", onStorage));
+	}, []);
+
+	useEffect(() => {
+		if (!virtualPrefs.value.enabled || !connected.value) return;
+		if (seats.value.length > 0) return;
+		syncSeats(1);
+	}, [virtualPrefs.value.enabled, connected.value]);
 
 	function toast(text: string): void {
 		const id = ++toastSeq.current;
@@ -559,7 +598,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						send(socket, { op: "admin_login", password: savedAdmin });
 					}
 				} catch {}
-				const count = chosen.value.length;
+				const count = virtualPrefs.value.enabled ? 1 : chosen.value.length;
 				if (count > 0) {
 					pendingPlays.current += 1;
 					const savedPin = localStorage.getItem("s2pipe_player_pin") ?? undefined;
@@ -602,6 +641,11 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							} else {
 								toast("Unable to take a pad.");
 							}
+						}
+						if (virtualPrefs.value.enabled) {
+							if (granted.length >= 1) return;
+							toast("All remote pads are taken.");
+							return;
 						}
 						if (pendingPlays.current === 0 && granted.length < chosen.value.length) {
 							chosen.value = chosen.value.slice(0, granted.length);
@@ -779,6 +823,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					socket.close();
 				} catch {}
 			}
+			if (document.pointerLockElement) document.exitPointerLock();
+			if (document.fullscreenElement) void document.exitFullscreen();
 		};
 	}, [nodeUrl, isTurnstilePassed]);
 
@@ -791,6 +837,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		const updatePads = () => {
 			const next = listGamepads();
 			pads.value = next;
+			if (virtualPrefs.value.enabled) return;
 			const still = chosen.value.filter((index) => index === TOUCH_INDEX || next.some((p) => p.index === index));
 			const lost = still.length !== chosen.value.length;
 			chosen.value = still;
@@ -809,14 +856,74 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!virtualPrefs.value.enabled) {
+			virtualRef.current?.detach();
+			virtualRef.current = null;
+			virtualLive.value = false;
+			return;
+		}
+		const pad = createVirtualPad();
+		virtualRef.current = pad;
+		pad.attach();
+		return holdPage(() => {
+			pad.detach();
+			if (virtualRef.current === pad) virtualRef.current = null;
+		});
+	}, [virtualPrefs.value.enabled]);
+
 	// Boucle d'envoi des inputs de la manette
 	useEffect(() => {
 		let frame = 0;
 		const lastBySeat = new Map<number, PadState>();
 		let lastAssignedKey = "";
 
+		let alive = true;
 		const loop = () => {
+			if (!alive) return;
 			frame = requestAnimationFrame(loop);
+
+			if (virtualPrefs.value.enabled) {
+				const virtual = virtualRef.current;
+				const state = virtual?.sample(virtualPrefs.value) ?? NEUTRAL;
+				const active = !samePad(state, NEUTRAL);
+				if (active !== virtualLive.value) virtualLive.value = active;
+
+				const ws = wsRef.current;
+				const assigned = seats.value;
+				if (!ws || ws.readyState !== WebSocket.OPEN || !assigned.length) {
+					if (lastAssignedKey) {
+						lastBySeat.clear();
+						lastAssignedKey = "";
+					}
+					return;
+				}
+				const assignedKey = assigned.join(",");
+				if (assignedKey !== lastAssignedKey) {
+					lastBySeat.clear();
+					lastAssignedKey = assignedKey;
+				}
+
+				if (inputMuted.value || stealthMode.value) {
+					for (let i = 0; i < assigned.length; i++) {
+						const seat = assigned[i]!;
+						const previous = lastBySeat.get(seat);
+						if (previous && !samePad(previous, NEUTRAL)) {
+							lastBySeat.set(seat, NEUTRAL);
+							send(ws, { op: "pad", data: NEUTRAL, seat });
+						}
+					}
+					return;
+				}
+
+				const seat = assigned[0]!;
+				const previous = lastBySeat.get(seat);
+				if (previous && samePad(previous, state)) return;
+				lastBySeat.set(seat, state);
+				send(ws, { op: "pad", data: state, seat });
+				return;
+			}
+
 			const tracker = inputRef.current;
 			if (!tracker) return;
 
@@ -909,6 +1016,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			if (stealthMode.value) return;
 
 			if (event.code === "Escape") {
+				if (document.pointerLockElement) return;
 				if (chatOpen.value) {
 					chatOpen.value = false;
 				} else if (uiHidden.value) {
@@ -924,7 +1032,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					if (settings.value) settings.value = false;
 					if (chatOpen.value) chatOpen.value = false;
 				}
-			} else if (event.code === "KeyC") {
+			} else if (event.shiftKey && event.code === "KeyC") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
 				chatOpen.value = !chatOpen.value;
@@ -933,14 +1041,14 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 					chatUnread.value = 0;
 					if (settings.value) settings.value = false;
 				}
-			} else if (event.code === "KeyP") {
+			} else if (event.shiftKey && event.code === "KeyP") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
 				if (adminAuthed.value) {
 					event.preventDefault();
 					toggleAdminPrivacy(!privacyMode.value);
 				}
-			} else if (event.code === "KeyI" || event.code === "F3") {
+			} else if ((event.shiftKey && event.code === "KeyI") || event.code === "F3") {
 				const target = event.target as HTMLElement | null;
 				if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
 				showStats.value = !showStats.value;
@@ -1109,6 +1217,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	}
 
 	function toggleSeat(index: number): void {
+		if (virtualPrefs.value.enabled) return;
 		const claimed = chosen.value.includes(index);
 		if (!claimed && occupied.value.length >= PAD_COUNT) {
 			toast("All remote pads are occupied.");
@@ -1123,6 +1232,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	function play(): void {
 		if (seats.value.length > 0) return;
+		if (virtualPrefs.value.enabled) {
+			syncSeats(1);
+			return;
+		}
 		if (chosen.value.length === 0) {
 			if (pads.value.length > 0) {
 				chosen.value = [pads.value[0].index];
@@ -1208,13 +1321,42 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	}
 
 	function watch(): void {
+		if (virtualPrefs.value.enabled) {
+			setVirtualEnabled(false);
+			return;
+		}
 		chosen.value = [];
+		syncSeats(0);
+	}
+
+	function setVirtualEnabled(enabled: boolean): void {
+		if (enabled === virtualPrefs.value.enabled) {
+			if (enabled) syncSeats(1);
+			return;
+		}
+		if (enabled) {
+			if (occupied.value.length >= PAD_COUNT && seats.value.length === 0) {
+				toast("All remote pads are taken.");
+				return;
+			}
+			chosen.value = [];
+			virtualPrefs.value = { ...virtualPrefs.value, enabled: true };
+			syncSeats(1);
+			return;
+		}
+		virtualPrefs.value = { ...virtualPrefs.value, enabled: false };
 		syncSeats(0);
 	}
 
 	function onStageClick(): void {
 		void videoRef.current?.play();
 		void audioRef.current?.audio.play();
+		if (settings.value) return;
+		const virtual = virtualRef.current;
+		if (!virtual || !virtualPrefs.value.enabled) return;
+		if (virtual.usesMouseAxis(virtualPrefs.value) && stageRef.current) {
+			virtual.requestPointerLock(stageRef.current);
+		}
 	}
 
 	function toggleFullscreen(): void {
@@ -1249,6 +1391,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			data-touch={touchEnabled.value ? "true" : undefined}
 			data-portrait={isPortrait.value ? "true" : undefined}
 			onClick={onStageClick}
+			onContextMenu={(event) => {
+				if (virtualPrefs.value.enabled) event.preventDefault();
+			}}
 			onDblClick={(event) => {
 				event.preventDefault();
 				toggleFullscreen();
@@ -1321,9 +1466,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						type="button"
 						class="btn btn-xs btn-warn admin-privacy-banner-btn"
 						onClick={() => toggleAdminPrivacy(false)}
-						title="Desativar Modo Privacidade (Tecla P)"
+						title="Desativar Modo Privacidade (Shift + P)"
 					>
-						Desativar (P)
+						Desativar (Shift + P)
 					</button>
 				</div>
 			)}
@@ -1535,53 +1680,80 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				<div class="play-bottom">
 					<div class="play-controller">
 						<div class="play-controller-bar">
-							{(touchEnabled.value || isTouchDevice()) && (() => {
-								const seat = seatByChosen.get(TOUCH_INDEX);
-								const claimed = chosen.value.includes(TOUCH_INDEX);
-								const full = occupied.value.length >= PAD_COUNT && !claimed;
-								const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
-								const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
-								return (
-									<button
-										type="button"
-										class="play-pad-btn"
-										data-state={state}
-										data-active={livePads.value.includes(TOUCH_INDEX) ? "true" : undefined}
-										disabled={full || !connected.value}
-										onClick={() => toggleSeat(TOUCH_INDEX)}
-									>
-										<span class="pad-icon"><Smartphone size={13} /></span>
-										<span class="pad-name">Touch Gamepad</span>
-										<span class="pad-status">{status}</span>
-									</button>
-								);
-							})()}
+							{virtualPrefs.value.enabled ? (
+								<button
+									type="button"
+									class="play-pad-btn"
+									data-state={seats.value[0] !== undefined ? "live" : "ready"}
+									data-active={virtualLive.value ? "true" : undefined}
+									disabled={!connected.value}
+									onClick={() => setVirtualEnabled(false)}
+								>
+									<span class="pad-icon"><Keyboard size={13} /></span>
+									<span class="pad-name">Virtual Controller</span>
+									<span class="pad-status">{seats.value[0] !== undefined ? `P${seats.value[0] + 1}` : "..."}</span>
+								</button>
+							) : (
+								<>
+									{(touchEnabled.value || isTouchDevice()) && (() => {
+										const seat = seatByChosen.get(TOUCH_INDEX);
+										const claimed = chosen.value.includes(TOUCH_INDEX);
+										const full = occupied.value.length >= PAD_COUNT && !claimed;
+										const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
+										const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
+										return (
+											<button
+												type="button"
+												class="play-pad-btn"
+												data-state={state}
+												data-active={livePads.value.includes(TOUCH_INDEX) ? "true" : undefined}
+												disabled={full || !connected.value}
+												onClick={() => toggleSeat(TOUCH_INDEX)}
+											>
+												<span class="pad-icon"><Smartphone size={13} /></span>
+												<span class="pad-name">Touch Gamepad</span>
+												<span class="pad-status">{status}</span>
+											</button>
+										);
+									})()}
 
-							{pads.value.map((pad) => {
-								const seat = seatByChosen.get(pad.index);
-								const claimed = chosen.value.includes(pad.index);
-								const full = occupied.value.length >= PAD_COUNT && !claimed;
-								const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
-								const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
-								return (
-									<button
-										type="button"
-										key={pad.index}
-										class="play-pad-btn"
-										data-state={state}
-										data-active={livePads.value.includes(pad.index) ? "true" : undefined}
-										disabled={full || !connected.value}
-										onClick={() => toggleSeat(pad.index)}
-									>
-										<span class="pad-icon"><Gamepad2 size={13} /></span>
-										<span class="pad-name">{padLabel(pad.id)}</span>
-										<span class="pad-status">{status}</span>
-									</button>
-								);
-							})}
+									{pads.value.map((pad) => {
+										const seat = seatByChosen.get(pad.index);
+										const claimed = chosen.value.includes(pad.index);
+										const full = occupied.value.length >= PAD_COUNT && !claimed;
+										const state = seat !== undefined ? "live" : claimed ? "ready" : "off";
+										const status = seat !== undefined ? `P${seat + 1}` : claimed ? "..." : full ? "Full" : "Play";
+										return (
+											<button
+												type="button"
+												key={pad.index}
+												class="play-pad-btn"
+												data-state={state}
+												data-active={livePads.value.includes(pad.index) ? "true" : undefined}
+												disabled={full || !connected.value}
+												onClick={() => toggleSeat(pad.index)}
+											>
+												<span class="pad-icon"><Gamepad2 size={13} /></span>
+												<span class="pad-name">{padLabel(pad.id)}</span>
+												<span class="pad-status">{status}</span>
+											</button>
+										);
+									})}
 
-							{pads.value.length === 0 && !touchEnabled.value && !isTouchDevice() && (
-								<p class="play-hint">Connect a gamepad or click the phone icon to play.</p>
+									{pads.value.length === 0 && !touchEnabled.value && !isTouchDevice() && (
+										<>
+											<p class="play-hint">Connect a gamepad or click the phone icon to play.</p>
+											<button
+												type="button"
+												class="btn btn-xs"
+												disabled={!connected.value || occupied.value.length >= PAD_COUNT}
+												onClick={() => setVirtualEnabled(true)}
+											>
+												<Keyboard size={13} /> Use virtual controller
+											</button>
+										</>
+									)}
+								</>
 							)}
 						</div>
 						{connected.value && seats.value.length === 0 && (
@@ -1621,7 +1793,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							type="button"
 							class="btn btn-icon"
 							aria-label="Stats"
-							title="Overlay Stats (I)"
+							title="Overlay Stats (Shift + I / F3)"
 							data-active={showStats.value ? "true" : undefined}
 							onClick={() => showStats.value = !showStats.value}
 						>
@@ -1647,7 +1819,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							type="button"
 							class="btn btn-icon play-chat-btn"
 							aria-label="Chat da Sala"
-							title={chatOpen.value ? "Fechar Chat (C)" : "Abrir Chat da Sala (C)"}
+							title={chatOpen.value ? "Fechar Chat (Shift + C)" : "Abrir Chat da Sala (Shift + C)"}
 							data-active={chatOpen.value ? "true" : undefined}
 							onClick={() => {
 								chatOpen.value = !chatOpen.value;
@@ -1830,6 +2002,25 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						/>
 					</div>
 
+					<div class="settings-divider" />
+					<section class="play-help">
+						<h3>Virtual controller</h3>
+						<label class="play-check" htmlFor="setting-virtual-enabled">
+							<input
+								id="setting-virtual-enabled"
+								type="checkbox"
+								checked={virtualPrefs.value.enabled}
+								onChange={(event) => setVirtualEnabled((event.target as HTMLInputElement).checked)}
+							/>
+							Enable virtual controller
+						</label>
+						<p>
+							Keyboard and mouse drive one Pico seat. Physical gamepads on this browser are ignored while
+							this is on. It stays off after a reload.
+						</p>
+						<a class="btn btn-block" href="/controller">Map buttons</a>
+					</section>
+
 					<section class="play-help">
 						<h3>Gamepad</h3>
 						<dl>
@@ -1949,14 +2140,14 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 											type="button"
 											class={`btn btn-xs ${privacyMode.value ? "btn-warn" : "btn-danger"}`}
 											onClick={() => toggleAdminPrivacy(!privacyMode.value)}
-											title="Pausa a transmissão pública e silencia o áudio dos espectadores (Atalho: Tecla P)"
+											title="Pausa a transmissão pública e silencia o áudio dos espectadores (Atalho: Shift + P)"
 										>
 											<EyeOff size={12} />
-											{privacyMode.value ? "Desativar Modo Privacidade (P)" : "Ativar Modo Privacidade (P)"}
+											{privacyMode.value ? "Desativar Modo Privacidade (Shift + P)" : "Ativar Modo Privacidade (Shift + P)"}
 										</button>
 									</div>
 									<p class="admin-privacy-hint">
-										Dica: Você também pode usar a tecla de atalho <strong>P</strong> ou o comando <strong>/censura</strong> no chat.
+										Dica: Você também pode usar o atalho <strong>Shift + P</strong> ou o comando <strong>/censura</strong> no chat.
 									</p>
 								</div>
 								<div class="admin-chat-box">

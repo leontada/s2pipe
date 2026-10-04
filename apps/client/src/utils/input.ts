@@ -100,7 +100,7 @@ function fromAxes(lx: number, ly: number, rx: number, ry: number, buttons: numbe
 	};
 }
 
-function isTyping(target: EventTarget | null): boolean {
+export function isTyping(target: EventTarget | null): boolean {
 	return (
 		target instanceof HTMLElement &&
 		Boolean(target.closest("input, select, textarea"))
@@ -229,7 +229,7 @@ export function createInputTracker() {
 export const KEYBOARD_HELP = [
 	["Esc", "Configurações"],
 	["Delete", "Modo Limpo (Ocultar/Exibir Interface)"],
-	["C", "Abrir / Fechar Chat"],
-	["P", "Modo Privacidade (Admin)"],
-	["I / F3", "WebRTC Stats Overlay"],
+	["Shift + C", "Abrir / Fechar Chat"],
+	["Shift + P", "Modo Privacidade (Admin)"],
+	["Shift + I / F3", "WebRTC Stats Overlay"],
 ] as const;
