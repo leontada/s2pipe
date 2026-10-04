@@ -130,6 +130,7 @@ function streamBanner(
 	connected: boolean,
 	capture: CaptureStatus | null,
 	live: boolean,
+	standby: boolean,
 ): { title: string; body: string } | null {
 	if (!connected) {
 		return { title: "Connecting", body: "Waiting for the node..." };
@@ -139,6 +140,9 @@ function streamBanner(
 			title: "Capture is down",
 			body: "MediaMTX is unreachable. The capture PC may be restarting.",
 		};
+	}
+	if (standby) {
+		return null;
 	}
 	if (!live) {
 		return { title: "Waiting for stream", body: "Connecting to the capture card..." };
@@ -933,19 +937,43 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		}
 	}, [muted.value, volume.value, live.value, privacyMode.value, adminAuthed.value]);
 
-	// Detecção inteligente de Standby / Console em Repouso via amostragem esparsa
+	// Detecção inteligente de Standby / Console em Repouso
 	useEffect(() => {
 		let canvas: HTMLCanvasElement | null = null;
 		let ctx: CanvasRenderingContext2D | null = null;
 		let blackStreak = 0;
+		let notLiveStreak = 0;
 
 		const timer = globalThis.setInterval(() => {
-			const video = videoRef.current;
-			if (!video || !live.value || privacyMode.value || video.readyState < 2) {
-				blackStreak = 0;
+			if (privacyMode.value) {
 				if (switchStandby.value) switchStandby.value = false;
 				return;
 			}
+
+			// Se o servidor WebSocket está conectado e MediaMTX está ativo, mas o vídeo não está ao vivo (Switch desligado/sem sinal HDMI)
+			if (!live.value) {
+				if (connected.value && (!capture.value || capture.value.running)) {
+					notLiveStreak++;
+					// Após 2 checagens (~2.4s) sem sinal de vídeo ativo, aciona a tela de Standby
+					if (notLiveStreak >= 2) {
+						if (!switchStandby.value) switchStandby.value = true;
+					}
+				} else {
+					notLiveStreak = 0;
+					if (switchStandby.value) switchStandby.value = false;
+				}
+				return;
+			}
+
+			// Se o vídeo está ao vivo, reseta o streak de stream inativo
+			notLiveStreak = 0;
+
+			const video = videoRef.current;
+			if (!video || video.readyState < 2) {
+				return;
+			}
+
+			// Amostragem de luminância para detectar tela preta com vídeo conectado
 			try {
 				if (!canvas) {
 					canvas = document.createElement("canvas");
@@ -964,7 +992,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				if (maxLum < 6) {
 					blackStreak++;
 					if (blackStreak >= 2) {
-						switchStandby.value = true;
+						if (!switchStandby.value) switchStandby.value = true;
 					}
 				} else {
 					blackStreak = 0;
@@ -975,7 +1003,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			} catch {
 				// Ignora se indisponível
 			}
-		}, 2500);
+		}, 1200);
 
 		return () => clearInterval(timer);
 	}, [isTurnstilePassed]);
@@ -1116,6 +1144,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	}
 
 	function sendAdminWake(): void {
+		toast("Enviando sinal de ativação (BLE) ao Switch...");
 		send(wsRef.current, { op: "admin_wake" });
 	}
 
@@ -1165,7 +1194,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 	const hideHud = fullscreen.value;
 	const padsFull = occupied.value.length >= PAD_COUNT && seats.value.length === 0;
-	const banner = streamBanner(connected.value, capture.value, live.value);
+	const banner = streamBanner(connected.value, capture.value, live.value, switchStandby.value);
 
 	const seatByChosen = new Map<number, number>();
 	for (let i = 0; i < seats.value.length && i < chosen.value.length; i++) {
