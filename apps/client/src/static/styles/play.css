@@ -82,7 +82,7 @@
 
 	position: absolute;
 	inset: 0;
-	z-index: 2;
+	z-index: 15;
 
 	background: linear-gradient(
 		to bottom,
@@ -510,7 +510,7 @@
 	top: 0;
 	right: 0;
 	bottom: 0;
-	z-index: 4;
+	z-index: 35;
 	overflow: auto;
 
 	background: var(--surface);
@@ -2231,7 +2231,7 @@
 .play-privacy-overlay {
 	position: absolute;
 	inset: 0;
-	z-index: 45;
+	z-index: 25;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -2336,7 +2336,7 @@
 .play-standby-overlay {
 	position: absolute;
 	inset: 0;
-	z-index: 40;
+	z-index: 2;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -2344,6 +2344,7 @@
 	backdrop-filter: blur(24px);
 	animation: fadeInOverlay 0.4s ease-out;
 	padding: var(--space-4);
+	pointer-events: auto;
 }
 
 .standby-card {
@@ -2591,6 +2592,33 @@
 @keyframes pulseStandbyDot {
 	0%, 100% { opacity: 0.5; transform: scale(0.9); }
 	50% { opacity: 1; transform: scale(1.2); }
+}
+
+.standby-spectator-box {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+}
+
+.standby-login-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	color: rgba(255, 255, 255, 0.75);
+	font-size: var(--text-xs);
+	padding: 6px 14px;
+	border-radius: var(--radius);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.standby-login-link:hover {
+	background: rgba(0, 180, 216, 0.15);
+	border-color: rgba(0, 180, 216, 0.4);
+	color: #00b4d8;
 }
 
 /* Painel do Admin: Caixa de Modo Privacidade */

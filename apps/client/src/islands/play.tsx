@@ -1359,9 +1359,21 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 								</span>
 							</div>
 						) : (
-							<div class="standby-spectator-badge">
-								<span class="standby-pulse-dot"></span>
-								<span>Aguardando administrador ou jogador acordar o Switch...</span>
+							<div class="standby-spectator-box">
+								<div class="standby-spectator-badge">
+									<span class="standby-pulse-dot"></span>
+									<span>Aguardando administrador acordar o Switch...</span>
+								</div>
+								<button
+									type="button"
+									class="standby-login-link"
+									title="Fazer login como administrador para acessar os controles de despertar"
+									onClick={() => {
+										settings.value = true;
+									}}
+								>
+									<Lock size={12} /> É o administrador? Entrar para acordar
+								</button>
 							</div>
 						)}
 					</div>
