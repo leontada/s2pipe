@@ -285,10 +285,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		checkOrientation();
 		window.addEventListener("resize", checkOrientation);
 		window.addEventListener("orientationchange", checkOrientation);
-		return () => {
+		return holdPage(() => {
 			window.removeEventListener("resize", checkOrientation);
 			window.removeEventListener("orientationchange", checkOrientation);
-		};
+		});
 	}, []);
 
 	useEffect(() => {
@@ -475,14 +475,14 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			}
 		}
 
-		return () => {
+		return holdPage(() => {
 			unmounted = true;
 			clearTimeout(safetyTimer);
 			if (widgetId) {
 				const activeCf = (globalThis as unknown as { turnstile?: { remove: (id: string) => void } }).turnstile;
 				try { activeCf?.remove(widgetId); } catch {}
 			}
-		};
+		});
 	}, [effectiveSiteKey]);
 
 	// Gestion de la connexion WHeP (Vidéo + Audio)
@@ -551,11 +551,17 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 		void connect();
 
-		return () => {
+		return holdPage(() => {
 			cancelled = true;
 			clearTimeout(retryTimer);
+			if (video) {
+				try {
+					video.pause();
+					video.srcObject = null;
+				} catch {}
+			}
 			cleanupWhep();
-		};
+		});
 	}, [nodeUrl, isTurnstilePassed]);
 
 	useEffect(() => {
@@ -571,10 +577,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		};
 		video.addEventListener("webkitendfullscreen", onEnd);
 		video.addEventListener("webkitbeginfullscreen", onBegin);
-		return () => {
+		return holdPage(() => {
 			video.removeEventListener("webkitendfullscreen", onEnd);
 			video.removeEventListener("webkitbeginfullscreen", onBegin);
-		};
+		});
 	}, []);
 
 	// Gestion WebSocket (Statut et Commandes)
@@ -808,7 +814,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 		connectWs();
 
-		return () => {
+		return holdPage(() => {
 			isClosed = true;
 			clearTimeout(retryTimer);
 			if (wsRef.current === socket) {
@@ -820,12 +826,15 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				socket.onopen = null;
 				socket.onmessage = null;
 				try {
+					if (socket.readyState === WebSocket.OPEN) {
+						send(socket, { op: "watch" });
+					}
 					socket.close();
 				} catch {}
 			}
 			if (document.pointerLockElement) document.exitPointerLock();
 			if (document.fullscreenElement) void document.exitFullscreen();
-		};
+		});
 	}, [nodeUrl, isTurnstilePassed]);
 
 	// Gestion des manettes (Gamepads)
@@ -848,12 +857,12 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		globalThis.addEventListener("gamepadconnected", updatePads);
 		globalThis.addEventListener("gamepaddisconnected", updatePads);
 
-		return () => {
+		return holdPage(() => {
 			tracker.detach();
 			inputRef.current = null;
 			globalThis.removeEventListener("gamepadconnected", updatePads);
 			globalThis.removeEventListener("gamepaddisconnected", updatePads);
-		};
+		});
 	}, []);
 
 	useEffect(() => {
@@ -994,7 +1003,10 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		};
 
 		frame = requestAnimationFrame(loop);
-		return () => cancelAnimationFrame(frame);
+		return holdPage(() => {
+			alive = false;
+			cancelAnimationFrame(frame);
+		});
 	}, []);
 
 	// Raccourci Clavier
@@ -1055,7 +1067,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			}
 		};
 		globalThis.addEventListener("keydown", onKey);
-		return () => globalThis.removeEventListener("keydown", onKey);
+		return holdPage(() => globalThis.removeEventListener("keydown", onKey));
 	}, []);
 
 	// Synchro Volume / Mute (Mutando para o público em Modo Privacidade e Mudo total em Modo Camuflagem)
@@ -1152,7 +1164,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			}
 		}, 2000);
 
-		return () => clearInterval(timer);
+		return holdPage(() => clearInterval(timer));
 	}, [isTurnstilePassed]);
 
 	// Récupération des stats du flux
@@ -1169,7 +1181,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				stats.value = result.stats;
 			}).catch(() => {});
 		}, 1000);
-		return () => clearInterval(timer);
+		return holdPage(() => clearInterval(timer));
 	}, [showStats.value]);
 
 	// Gestion Plein Écran
@@ -1180,7 +1192,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			if (on) settings.value = false;
 		};
 		document.addEventListener("fullscreenchange", onFs);
-		return () => document.removeEventListener("fullscreenchange", onFs);
+		return holdPage(() => document.removeEventListener("fullscreenchange", onFs));
 	}, []);
 
 	function syncSeats(count: number, pin?: string): void {
@@ -2018,7 +2030,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 							Keyboard and mouse drive one Pico seat. Physical gamepads on this browser are ignored while
 							this is on. It stays off after a reload.
 						</p>
-						<a class="btn btn-block" href="/controller">Map buttons</a>
+						<a class="btn btn-block" href="/controller" target="_blank" rel="noopener noreferrer">Map buttons ↗</a>
 					</section>
 
 					<section class="play-help">

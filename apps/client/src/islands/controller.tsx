@@ -264,7 +264,17 @@ export default function Controller() {
 				<span>s2</span>pipe
 			</p>
 			<p id="back">
-				<a href="/">Back to play</a>
+				<a
+					href="/"
+					onClick={(e: MouseEvent) => {
+						if (window.opener) {
+							e.preventDefault();
+							window.close();
+						}
+					}}
+				>
+					Back to play
+				</a>
 			</p>
 			<h1>Virtual controller</h1>
 			<p>
