@@ -944,17 +944,23 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		let blackStreak = 0;
 		let notLiveStreak = 0;
 
+		// 60 amostras a cada 2000ms = 120 segundos (2 minutos) contínuos de tela 100% preta
+		// Garante que telas de loading ou transições entre fases nunca disparem o modo Standby por engano
+		const BLACK_STANDBY_MAX_TICKS = 60;
+
 		const timer = globalThis.setInterval(() => {
 			if (privacyMode.value) {
+				blackStreak = 0;
 				if (switchStandby.value) switchStandby.value = false;
 				return;
 			}
 
 			// Se o servidor WebSocket está conectado e MediaMTX está ativo, mas o vídeo não está ao vivo (Switch desligado/sem sinal HDMI)
 			if (!live.value) {
+				blackStreak = 0;
 				if (connected.value && (!capture.value || capture.value.running)) {
 					notLiveStreak++;
-					// Após 2 checagens (~2.4s) sem sinal de vídeo ativo, aciona a tela de Standby
+					// Após 2 checagens (~4s) sem sinal de vídeo ativo, aciona a tela de Standby
 					if (notLiveStreak >= 2) {
 						if (!switchStandby.value) switchStandby.value = true;
 					}
@@ -973,7 +979,8 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				return;
 			}
 
-			// Amostragem de luminância para detectar tela preta com vídeo conectado
+			// Amostragem de luminância para detectar tela preta com vídeo conectado (ex: console suspenso com placa gerando sinal preto)
+			// Exige 2 minutos (120s) de escuridão contínua para evitar falsos positivos em telas de loading
 			try {
 				if (!canvas) {
 					canvas = document.createElement("canvas");
@@ -991,7 +998,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 				}
 				if (maxLum < 6) {
 					blackStreak++;
-					if (blackStreak >= 2) {
+					if (blackStreak >= BLACK_STANDBY_MAX_TICKS) {
 						if (!switchStandby.value) switchStandby.value = true;
 					}
 				} else {
@@ -1003,7 +1010,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			} catch {
 				// Ignora se indisponível
 			}
-		}, 1200);
+		}, 2000);
 
 		return () => clearInterval(timer);
 	}, [isTurnstilePassed]);
