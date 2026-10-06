@@ -250,7 +250,7 @@ fi
 while :; do
     echo "Starting video publisher on ${CAPTURE_DEVICE:-test source}." >&2
     run_ffmpeg_with_watchdog \
-        -hide_banner -nostats -loglevel debug "${video[@]}" "${video_encoder[@]}" -an \
+        -hide_banner -nostats -loglevel error "${video[@]}" "${video_encoder[@]}" -an \
         "${rtsp_out_opts[@]}" rtsp://127.0.0.1:8554/switch || true
 
     echo "Video publisher stopped; retrying in 1 second." >&2
