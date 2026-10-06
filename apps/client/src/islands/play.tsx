@@ -253,6 +253,48 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 	} | null>(null);
 	const chatToastTimer = useRef<number | null>(null);
 
+	// Brand Top Bar Metrics Signals & Alert Watchers
+	const chatAlert = useSignal(false);
+	const playersAlert = useSignal(false);
+	const viewersAlert = useSignal(false);
+
+	const prevUnreadRef = useRef<number | null>(null);
+	const prevPlayersRef = useRef<number | null>(null);
+	const prevViewersRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		if (prevUnreadRef.current !== null && chatUnread.value > prevUnreadRef.current) {
+			chatAlert.value = true;
+			const timer = setTimeout(() => {
+				chatAlert.value = false;
+			}, 900);
+			return () => clearTimeout(timer);
+		}
+		prevUnreadRef.current = chatUnread.value;
+	}, [chatUnread.value]);
+
+	useEffect(() => {
+		if (prevPlayersRef.current !== null && occupied.value.length !== prevPlayersRef.current) {
+			playersAlert.value = true;
+			const timer = setTimeout(() => {
+				playersAlert.value = false;
+			}, 900);
+			return () => clearTimeout(timer);
+		}
+		prevPlayersRef.current = occupied.value.length;
+	}, [occupied.value.length]);
+
+	useEffect(() => {
+		if (prevViewersRef.current !== null && viewersCount.value !== prevViewersRef.current) {
+			viewersAlert.value = true;
+			const timer = setTimeout(() => {
+				viewersAlert.value = false;
+			}, 900);
+			return () => clearTimeout(timer);
+		}
+		prevViewersRef.current = viewersCount.value;
+	}, [viewersCount.value]);
+
 	useEffect(() => {
 		const prefs = loadPlayPrefs();
 		muted.value = prefs.muted;
@@ -739,6 +781,12 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						chatMessages.value = msg.data.history;
 					} else if (msg.op === "chat_msg") {
 						chatMessages.value = [...chatMessages.value, msg.data];
+						if (!msg.data.isSystem && msg.data.nick !== chatNick.value) {
+							chatAlert.value = true;
+							setTimeout(() => {
+								chatAlert.value = false;
+							}, 900);
+						}
 						if (!chatOpen.value && !msg.data.isSystem && msg.data.nick !== chatNick.value) {
 							chatUnread.value = chatUnread.value + 1;
 							const shouldShowToast = chatToastsEnabled.value && (!uiHidden.value || chatToastsOnHidden.value);
@@ -1610,21 +1658,56 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 			<div class={`play-hud ${uiHidden.value ? "ui-hidden" : ""}`} onClick={(event) => event.stopPropagation()}>
 				<div class="play-top">
-					<button
-						type="button"
-						class="play-brand brand-interactive"
-						title={uiHidden.value ? "Restaurar interface (Delete)" : "Ocultar interface (Delete)"}
-						onClick={(e: MouseEvent) => {
-							e.stopPropagation();
-							uiHidden.value = !uiHidden.value;
-							if (uiHidden.value) {
-								if (settings.value) settings.value = false;
-								if (chatOpen.value) chatOpen.value = false;
-							}
-						}}
-					>
-						<span>NS2</span> Arcade
-					</button>
+					<div class="play-brand-group">
+						<button
+							type="button"
+							class="play-brand brand-interactive"
+							title={uiHidden.value ? "Restaurar interface (Delete)" : "Ocultar interface (Delete)"}
+							onClick={(e: MouseEvent) => {
+								e.stopPropagation();
+								uiHidden.value = !uiHidden.value;
+								if (uiHidden.value) {
+									if (settings.value) settings.value = false;
+									if (chatOpen.value) chatOpen.value = false;
+								}
+							}}
+						>
+							<span>NS2</span> Arcade
+						</button>
+						<div class="play-brand-pill">
+							<button
+								type="button"
+								class={`play-metric-chat ${chatUnread.value > 0 ? "has-unread" : ""} ${chatAlert.value ? "metric-alert" : ""}`}
+								title={chatUnread.value > 0 ? `${chatUnread.value} nova(s) mensagem(ns) (Clique para abrir)` : "Chat da sala"}
+								onClick={(e: MouseEvent) => {
+									e.stopPropagation();
+									chatOpen.value = !chatOpen.value;
+									if (chatOpen.value) {
+										chatUnread.value = 0;
+										if (uiHidden.value) uiHidden.value = false;
+									}
+								}}
+							>
+								<MessageSquare size={13} aria-hidden="true" />
+							</button>
+							<div class="play-pill-divider" />
+							<div
+								class={`play-metric-badge metric-players ${playersAlert.value ? "metric-alert" : ""}`}
+								title={`${occupied.value.length} jogador(es) ativo(s)`}
+							>
+								<Gamepad2 size={13} aria-hidden="true" />
+								<span class="metric-val">{occupied.value.length}</span>
+							</div>
+							<div class="play-pill-divider" />
+							<div
+								class={`play-metric-badge metric-viewers ${viewersAlert.value ? "metric-alert" : ""}`}
+								title={`${viewersCount.value} espectador(es) assistindo`}
+							>
+								<Eye size={13} aria-hidden="true" />
+								<span class="metric-val">{viewersCount.value}</span>
+							</div>
+						</div>
+					</div>
 					<div class="play-slots">
 						<span class="play-count">
 							{occupied.value.length}/{PAD_COUNT} playing
