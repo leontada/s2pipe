@@ -28,6 +28,7 @@
 
 	object-fit: contain;
 	touch-action: none;
+	transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 #play[data-fill="true"] > video {
@@ -93,7 +94,7 @@
 	);
 
 	pointer-events: none;
-	transition: background 0.25s ease;
+	transition: background 0.25s ease, width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .play-hud.ui-hidden {
@@ -1879,6 +1880,17 @@
 
 	pointer-events: auto;
 	touch-action: auto;
+
+	animation: drawerSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawerSlideIn {
+	from {
+		transform: translateX(100%);
+	}
+	to {
+		transform: translateX(0);
+	}
 }
 
 .chat-header {
@@ -2294,6 +2306,19 @@
 	}
 }
 
+/* Modo Teatro Inteligente (Deslocamento automático de vídeo com Chat aberto em Desktop fora de Fullscreen) */
+@media (min-width: 1024px) {
+	#play[data-chat="true"]:not([data-fullscreen="true"]) > video,
+	#play[data-chat="true"]:not([data-fullscreen="true"]) .play-hud,
+	#play[data-chat="true"]:not([data-fullscreen="true"]) .play-privacy-overlay {
+		width: calc(100% - 24rem);
+	}
+
+	#play[data-chat="true"]:not([data-fullscreen="true"]) .admin-privacy-banner {
+		left: calc((100% - 24rem) / 2);
+	}
+}
+
 /* Floating Chat Toast (Nintendo Switch style) */
 .play-chat-toast {
 	position: absolute;
@@ -2441,6 +2466,7 @@
 	top: var(--space-3);
 	left: 50%;
 	transform: translateX(-50%);
+	transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 	z-index: 60;
 	display: flex;
 	align-items: center;
@@ -2506,6 +2532,7 @@
 	backdrop-filter: blur(28px);
 	animation: fadeInOverlay 0.35s ease-out;
 	padding: var(--space-4);
+	transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeInOverlay {

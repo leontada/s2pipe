@@ -1521,6 +1521,8 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			data-idle={hideHud ? "true" : undefined}
 			data-touch={touchEnabled.value ? "true" : undefined}
 			data-portrait={isPortrait.value ? "true" : undefined}
+			data-fullscreen={fullscreen.value ? "true" : undefined}
+			data-chat={chatOpen.value ? "true" : undefined}
 			onClick={onStageClick}
 			onContextMenu={(event) => {
 				if (virtualPrefs.value.enabled) event.preventDefault();

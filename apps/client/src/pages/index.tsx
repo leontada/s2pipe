@@ -25,7 +25,7 @@ export default {
 
 	title: "NS2 Arcade",
 
-	styles: ["/styles/play.css?v=20261007_chat"],
+	styles: ["/styles/play.css?v=20261007_theater"],
 	scripts: [],
 
 	head: null,
