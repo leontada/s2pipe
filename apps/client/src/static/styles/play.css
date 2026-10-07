@@ -2154,6 +2154,93 @@
 	justify-content: center;
 }
 
+.chat-scroll-bottom-btn {
+	position: absolute;
+	bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 20;
+	background: var(--accent);
+	color: #0b0d11;
+	font-size: 0.75rem;
+	font-weight: 700;
+	padding: 5px 12px;
+	border-radius: 9999px;
+	border: none;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+	animation: chatScrollBtnFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	user-select: none;
+}
+
+.chat-scroll-bottom-btn:hover {
+	transform: translateX(-50%) translateY(-2px);
+	background: #4ef0aa;
+}
+
+@keyframes chatScrollBtnFade {
+	from {
+		opacity: 0;
+		transform: translateX(-50%) translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(-50%) translateY(0);
+	}
+}
+
+.chat-quick-reactions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px var(--space-4);
+	background: rgba(18, 20, 26, 0.7);
+	border-top: 1px solid rgba(255, 255, 255, 0.05);
+	overflow-x: auto;
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.chat-quick-reactions::-webkit-scrollbar {
+	display: none;
+}
+
+.chat-quick-pill {
+	flex-shrink: 0;
+	font-family: var(--font-sans);
+	font-size: 0.75rem;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	color: var(--muted);
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+	user-select: none;
+	line-height: 1.4;
+}
+
+.chat-quick-pill:hover:not(:disabled) {
+	background: rgba(62, 230, 160, 0.15);
+	border-color: rgba(62, 230, 160, 0.35);
+	color: var(--accent);
+	transform: translateY(-1px);
+}
+
+.chat-quick-pill:active:not(:disabled) {
+	transform: translateY(0);
+}
+
+.chat-quick-pill:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
 .admin-chat-box {
 	display: flex;
 	flex-direction: column;

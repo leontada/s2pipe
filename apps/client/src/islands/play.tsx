@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, Eye, EyeOff, Gamepad2, Home, Keyboard, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, ArrowDown, Eye, EyeOff, Gamepad2, Home, Keyboard, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
 
 import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -37,6 +37,8 @@ import {
 	type VirtualPrefs,
 } from "../utils/virtual/mod.ts";
 import { turnstileSiteKey as getTurnstileSiteKey } from "../client.ts";
+
+const QUICK_REACTIONS = ["GG", "F", "POG", "NICE", "🔥", "🎮", "👏"] as const;
 
 type Props = {
 	nodeUrl: string;
@@ -240,6 +242,10 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	const chatEditingNick = useSignal(false);
 	const chatNewNickInput = useSignal("");
 	const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+	const chatContainerRef = useRef<HTMLDivElement>(null);
+	const isChatAtBottomRef = useRef(true);
+	const chatNewBelowCount = useSignal(0);
+	const lastChatChimeRef = useRef(0);
 
 	// Chat Toast & Audio signals
 	const chatToastsEnabled = useSignal(true);
@@ -420,10 +426,27 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			if (confirm("Deseja limpar as mensagens da sua tela?")) {
 				chatMessages.value = [];
 				chatUnread.value = 0;
+				chatNewBelowCount.value = 0;
 				activeChatToast.value = null;
 				toast("Mensagens locais limpas.");
 			}
 		}
+	}
+
+	function handleChatScroll(): void {
+		const el = chatContainerRef.current;
+		if (!el) return;
+		const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 45;
+		isChatAtBottomRef.current = isAtBottom;
+		if (isAtBottom) {
+			chatNewBelowCount.value = 0;
+		}
+	}
+
+	function scrollToChatBottom(): void {
+		chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+		isChatAtBottomRef.current = true;
+		chatNewBelowCount.value = 0;
 	}
 
 	function updateNick(newNick: string): void {
@@ -803,15 +826,17 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							const saved = localStorage.getItem("ns2_arcade_nick");
 							if (saved && saved.trim()) {
 								chosenNick = saved.trim();
-								send(socket, { op: "chat_nick", nick: chosenNick });
+								send(socket, { op: "chat_nick", nick: chosenNick, silent: true });
 							} else {
 								localStorage.setItem("ns2_arcade_nick", chosenNick);
 							}
 						} catch {}
 						chatNick.value = chosenNick;
-						chatMessages.value = msg.data.history;
+						chatMessages.value = msg.data.history.slice(-100);
+						isChatAtBottomRef.current = true;
+						chatNewBelowCount.value = 0;
 					} else if (msg.op === "chat_msg") {
-						chatMessages.value = [...chatMessages.value, msg.data];
+						chatMessages.value = [...chatMessages.value, msg.data].slice(-100);
 						if (!msg.data.isSystem && msg.data.nick !== chatNick.value) {
 							chatAlert.value = true;
 							setTimeout(() => {
@@ -838,12 +863,20 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 								}, 6500);
 							}
 							if (chatSoundVolume.value > 0) {
-								playChatChime(chatSoundVolume.value);
+								const now = Date.now();
+								if (now - lastChatChimeRef.current > 1800) {
+									lastChatChimeRef.current = now;
+									playChatChime(chatSoundVolume.value);
+								}
 							}
 						}
-						setTimeout(() => {
-							chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-						}, 50);
+						if (isChatAtBottomRef.current) {
+							setTimeout(() => {
+								chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+							}, 40);
+						} else {
+							chatNewBelowCount.value = chatNewBelowCount.value + 1;
+						}
 					} else if (msg.op === "chat_nick_ack") {
 						if (msg.data.success) {
 							chatNick.value = msg.data.nick;
@@ -858,6 +891,8 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 					} else if (msg.op === "chat_cleared") {
 						chatMessages.value = msg.data.history;
 						chatUnread.value = 0;
+						chatNewBelowCount.value = 0;
+						isChatAtBottomRef.current = true;
 						activeChatToast.value = null;
 						toast("O histórico do chat foi limpo pelo administrador.");
 					} else if (msg.op === "chat_status") {
@@ -1130,7 +1165,12 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				if (chatOpen.value) {
 					if (uiHidden.value) uiHidden.value = false;
 					chatUnread.value = 0;
+					chatNewBelowCount.value = 0;
+					isChatAtBottomRef.current = true;
 					if (settings.value) settings.value = false;
+					setTimeout(() => {
+						chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+					}, 50);
 				}
 			} else if (event.shiftKey && event.code === "KeyP") {
 				const target = event.target as HTMLElement | null;
@@ -1721,7 +1761,12 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 									chatOpen.value = !chatOpen.value;
 									if (chatOpen.value) {
 										chatUnread.value = 0;
+										chatNewBelowCount.value = 0;
+										isChatAtBottomRef.current = true;
 										if (uiHidden.value) uiHidden.value = false;
+										setTimeout(() => {
+											chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+										}, 50);
 									}
 								}}
 							>
@@ -1957,7 +2002,12 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 								chatOpen.value = !chatOpen.value;
 								if (chatOpen.value) {
 									chatUnread.value = 0;
+									chatNewBelowCount.value = 0;
+									isChatAtBottomRef.current = true;
 									if (settings.value) settings.value = false;
+									setTimeout(() => {
+										chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+									}, 50);
 								}
 							}}
 						>
@@ -2431,7 +2481,11 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 						)}
 					</div>
 
-					<div class="chat-messages-container">
+					<div
+						class="chat-messages-container"
+						ref={chatContainerRef}
+						onScroll={handleChatScroll}
+					>
 						{chatMessages.value.length === 0 ? (
 							<div class="chat-empty">
 								<p>Nenhuma mensagem ainda.</p>
@@ -2470,6 +2524,33 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							})
 						)}
 						<div ref={chatMessagesEndRef} />
+					</div>
+
+					{chatNewBelowCount.value > 0 && (
+						<button
+							type="button"
+							class="chat-scroll-bottom-btn"
+							onClick={scrollToChatBottom}
+							aria-label="Rolar para as novas mensagens"
+						>
+							<ArrowDown size={13} />
+							<span>Novas mensagens ({chatNewBelowCount.value})</span>
+						</button>
+					)}
+
+					<div class="chat-quick-reactions">
+						{QUICK_REACTIONS.map((em) => (
+							<button
+								key={em}
+								type="button"
+								class="chat-quick-pill"
+								disabled={(!chatEnabled.value && !adminAuthed.value) || !!chatEditingNick.value}
+								onClick={() => sendChatMessage(em)}
+								title={`Enviar "${em}"`}
+							>
+								{em}
+							</button>
+						))}
 					</div>
 
 					<form
@@ -2571,7 +2652,12 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 						if (uiHidden.value) uiHidden.value = false;
 						chatOpen.value = true;
 						chatUnread.value = 0;
+						chatNewBelowCount.value = 0;
+						isChatAtBottomRef.current = true;
 						activeChatToast.value = null;
+						setTimeout(() => {
+							chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+						}, 50);
 					}}
 				>
 					<div class="chat-toast-header">

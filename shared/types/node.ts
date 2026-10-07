@@ -69,7 +69,7 @@ export type ClientMessage =
 	| { op: "admin_clear_chat" }
 	| { op: "admin_toggle_privacy"; enabled: boolean }
 	| { op: "chat_send"; text: string }
-	| { op: "chat_nick"; nick: string };
+	| { op: "chat_nick"; nick: string; silent?: boolean };
 
 export type ServerMessage =
 	| { op: "status"; data: StatusData }

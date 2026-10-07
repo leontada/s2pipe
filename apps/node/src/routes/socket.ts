@@ -26,12 +26,15 @@ import {
 	canSend,
 	clearChatHistory,
 	createMessage,
+	findSocketByNick,
 	getChatHistory,
 	getSocketNick,
 	isChatEnabled,
+	muteSocket,
 	removeSocket,
 	setChatEnabled,
 	setSocketNick,
+	unmuteSocket,
 } from "@/services/chat.ts";
 import { PAD_COUNT, PadButton } from "@s2pipe/shared/types/pad";
 import type { ClientMessage, ServerMessage } from "@s2pipe/shared/types/node";
@@ -186,24 +189,129 @@ function bind(ws: WebSocket): void {
 				}
 				case "chat_send": {
 					const isAdmin = adminSockets.has(ws);
-					const check = canSend(ws, isAdmin);
+					const rawText = msg.text?.trim() || "";
+					if (!rawText) return;
+
+					const check = canSend(ws, rawText, isAdmin);
 					if (!check.ok) {
 						send(ws, {
 							op: "chat_msg",
 							data: {
 								id: crypto.randomUUID(),
 								nick: "Sistema",
-								text: check.reason === "chat_disabled"
-									? "O chat está desativado pelo administrador."
-									: "Você está digitando rápido demais. Aguarde um instante.",
+								text: check.reason,
 								time: Date.now(),
 								isSystem: true,
 							},
 						});
 						return;
 					}
-					const rawText = msg.text?.trim() || "";
-					if (!rawText) return;
+
+					// Admin command: /mute [apelido] [minutos]
+					if (rawText.startsWith("/mute ")) {
+						if (isAdmin) {
+							const parts = rawText.slice(6).trim().split(/\s+/);
+							const targetNick = parts[0] || "";
+							const durationMins = parts[1] ? Number.parseInt(parts[1], 10) || 5 : 5;
+							const targetWs = findSocketByNick(targetNick);
+							if (targetWs) {
+								muteSocket(targetWs, durationMins);
+								send(targetWs, {
+									op: "chat_msg",
+									data: {
+										id: crypto.randomUUID(),
+										nick: "Sistema",
+										text: `Você foi silenciado por um administrador por ${durationMins} minuto(s).`,
+										time: Date.now(),
+										isSystem: true,
+									},
+								});
+								const notice = createMessage({
+									text: `O usuário "${targetNick}" foi silenciado por ${durationMins} minuto(s).`,
+									nick: "Sistema",
+									isSystem: true,
+								});
+								if (notice) {
+									forEachViewer((v) => send(v, { op: "chat_msg", data: notice }));
+								}
+							} else {
+								send(ws, {
+									op: "chat_msg",
+									data: {
+										id: crypto.randomUUID(),
+										nick: "Sistema",
+										text: `Usuário "${targetNick}" não encontrado online.`,
+										time: Date.now(),
+										isSystem: true,
+									},
+								});
+							}
+						} else {
+							send(ws, {
+								op: "chat_msg",
+								data: {
+									id: crypto.randomUUID(),
+									nick: "Sistema",
+									text: "Comando exclusivo para administradores.",
+									time: Date.now(),
+									isSystem: true,
+								},
+							});
+						}
+						return;
+					}
+
+					// Admin command: /unmute [apelido]
+					if (rawText.startsWith("/unmute ")) {
+						if (isAdmin) {
+							const targetNick = rawText.slice(8).trim();
+							const targetWs = findSocketByNick(targetNick);
+							if (targetWs) {
+								unmuteSocket(targetWs);
+								send(targetWs, {
+									op: "chat_msg",
+									data: {
+										id: crypto.randomUUID(),
+										nick: "Sistema",
+										text: "Seu silenciamento foi removido pelo administrador.",
+										time: Date.now(),
+										isSystem: true,
+									},
+								});
+								const notice = createMessage({
+									text: `O silenciamento de "${targetNick}" foi removido.`,
+									nick: "Sistema",
+									isSystem: true,
+								});
+								if (notice) {
+									forEachViewer((v) => send(v, { op: "chat_msg", data: notice }));
+								}
+							} else {
+								send(ws, {
+									op: "chat_msg",
+									data: {
+										id: crypto.randomUUID(),
+										nick: "Sistema",
+										text: `Usuário "${targetNick}" não encontrado online.`,
+										time: Date.now(),
+										isSystem: true,
+									},
+								});
+							}
+						} else {
+							send(ws, {
+								op: "chat_msg",
+								data: {
+									id: crypto.randomUUID(),
+									nick: "Sistema",
+									text: "Comando exclusivo para administradores.",
+									time: Date.now(),
+									isSystem: true,
+								},
+							});
+						}
+						return;
+					}
 
 					if (rawText === "/censura" || rawText === "/privacidade" || rawText === "/privacy") {
 						if (isAdmin) {
@@ -237,15 +345,15 @@ function bind(ws: WebSocket): void {
 					if (rawText.startsWith("/nick ")) {
 						const requestedNick = rawText.slice(6).trim();
 						const oldNick = getSocketNick(ws);
-						const updatedNick = setSocketNick(ws, requestedNick);
-						if (updatedNick) {
+						const result = setSocketNick(ws, requestedNick);
+						if (result.ok) {
 							send(ws, {
 								op: "chat_nick_ack",
-								data: { nick: updatedNick, success: true },
+								data: { nick: result.nick, success: true },
 							});
-							if (oldNick !== updatedNick) {
+							if (oldNick !== result.nick) {
 								const notice = createMessage({
-									text: `"${oldNick}" agora é conhecido como "${updatedNick}"`,
+									text: `"${oldNick}" agora é conhecido como "${result.nick}"`,
 									nick: "Sistema",
 									isSystem: true,
 								});
@@ -256,7 +364,7 @@ function bind(ws: WebSocket): void {
 						} else {
 							send(ws, {
 								op: "chat_nick_ack",
-								data: { nick: oldNick, success: false, error: "Nome inválido (use de 2 a 24 caracteres)." },
+								data: { nick: oldNick, success: false, error: result.error },
 							});
 						}
 						return;
@@ -299,16 +407,17 @@ function bind(ws: WebSocket): void {
 				}
 				case "chat_nick": {
 					const requestedNick = msg.nick?.trim() || "";
+					const isSilent = Boolean(msg.silent);
 					const oldNick = getSocketNick(ws);
-					const updatedNick = setSocketNick(ws, requestedNick);
-					if (updatedNick) {
+					const result = setSocketNick(ws, requestedNick);
+					if (result.ok) {
 						send(ws, {
 							op: "chat_nick_ack",
-							data: { nick: updatedNick, success: true },
+							data: { nick: result.nick, success: true },
 						});
-						if (oldNick !== updatedNick) {
+						if (!isSilent && oldNick !== result.nick) {
 							const notice = createMessage({
-								text: `"${oldNick}" agora é conhecido como "${updatedNick}"`,
+								text: `"${oldNick}" agora é conhecido como "${result.nick}"`,
 								nick: "Sistema",
 								isSystem: true,
 							});
@@ -319,7 +428,7 @@ function bind(ws: WebSocket): void {
 					} else {
 						send(ws, {
 							op: "chat_nick_ack",
-							data: { nick: oldNick, success: false, error: "Nome inválido (use de 2 a 24 caracteres)." },
+							data: { nick: oldNick, success: false, error: result.error },
 						});
 					}
 					return;
