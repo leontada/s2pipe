@@ -203,6 +203,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	const stats = useSignal<StreamStats | null>(null);
 	const fullscreen = useSignal(false);
 	const live = useSignal(false);
+	const activeFeed = useSignal<string>(relayUrl ? "Relay" : "Direct");
 	const toasts = useSignal<Toast[]>([]);
 	const touchEnabled = useSignal(false);
 	const touchOpacity = useSignal(0.7);
@@ -552,14 +553,16 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		};
 
 		const connect = async () => {
+			let activeUrl = targetUrl;
 			try {
-				videoHandle = await startWhep(targetUrl, video);
+				videoHandle = await startWhep(activeUrl, video);
 				if (cancelled) {
 					void videoHandle.close();
 					return;
 				}
 				whepRef.current = videoHandle;
 				live.value = true;
+				activeFeed.value = hasSeat ? "Direct (P)" : (activeUrl === relayUrl ? "Relay" : "Direct");
 
 				onWhepDead(videoHandle.pc, (hadMedia) => {
 					if (!hadMedia && !iceHinted) {
@@ -576,14 +579,16 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				// Fallback gracioso: se o relay falhar, tenta conectar direto no nodeUrl local
 				if (targetUrl !== nodeUrl && !cancelled) {
 					console.warn("Relay stream unavailable, falling back to direct node:", err);
+					activeUrl = nodeUrl;
 					try {
-						videoHandle = await startWhep(nodeUrl, video);
+						videoHandle = await startWhep(activeUrl, video);
 						if (cancelled) {
 							void videoHandle.close();
 							return;
 						}
 						whepRef.current = videoHandle;
 						live.value = true;
+						activeFeed.value = "Direct (Fallback)";
 						onWhepDead(videoHandle.pc, (hadMedia) => {
 							if (!cancelled) {
 								live.value = false;
@@ -593,17 +598,16 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 						});
 					} catch {
 						if (!cancelled) retryTimer = globalThis.setTimeout(connect, 2000);
+						return;
 					}
+				} else {
+					if (!cancelled) retryTimer = globalThis.setTimeout(connect, 2000);
 					return;
 				}
-				if (!cancelled) {
-					retryTimer = globalThis.setTimeout(connect, 2000);
-				}
-				return;
 			}
 
 			try {
-				audioHandle = await startAudioWhep(targetUrl);
+				audioHandle = await startAudioWhep(activeUrl);
 				if (audioHandle) {
 					if (cancelled) {
 						void audioHandle.close();
@@ -1683,7 +1687,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 					<div>
 						<dt>Feed</dt>
 						<dd class="stat-good">
-							{seats.value.length > 0 ? "Direct (P)" : (relayUrl ? "Relay" : "Direct")}
+							{activeFeed.value}
 						</dd>
 					</div>
 				</dl>
