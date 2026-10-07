@@ -40,6 +40,7 @@ import { turnstileSiteKey as getTurnstileSiteKey } from "../client.ts";
 
 type Props = {
 	nodeUrl: string;
+	relayUrl?: string;
 	nodeLocked: boolean;
 	turnstileSiteKey?: string;
 };
@@ -161,7 +162,7 @@ function streamBanner(
 	return null;
 }
 
-export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
+export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }: Props) {
 	const effectiveSiteKey = turnstileSiteKey || getTurnstileSiteKey() || "0x4AAAAAAEwg5V8LpgJXde_q";
 	const turnstilePassed = useSignal(false);
 	const turnstileBlocked = useSignal(false);
@@ -527,7 +528,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		});
 	}, [effectiveSiteKey]);
 
-	// Gestion de la connexion WHeP (Vidéo + Audio)
+	// Gestion de la connexion WHeP (Vidéo + Audio) com Split-Tier (Relay para Viewers, Direto para Players)
 	useEffect(() => {
 		if (!isTurnstilePassed) return;
 		const video = videoRef.current;
@@ -537,6 +538,9 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 		let audioHandle: AudioWhepHandle | null = null;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let iceHinted = false;
+
+		const hasSeat = seats.value.length > 0;
+		const targetUrl = (hasSeat || !relayUrl) ? nodeUrl : relayUrl;
 
 		const cleanupWhep = () => {
 			void videoHandle?.close();
@@ -549,7 +553,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 
 		const connect = async () => {
 			try {
-				videoHandle = await startWhep(nodeUrl, video);
+				videoHandle = await startWhep(targetUrl, video);
 				if (cancelled) {
 					void videoHandle.close();
 					return;
@@ -568,7 +572,30 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						retryTimer = globalThis.setTimeout(connect, hadMedia ? 1500 : 2000);
 					}
 				});
-			} catch {
+			} catch (err) {
+				// Fallback gracioso: se o relay falhar, tenta conectar direto no nodeUrl local
+				if (targetUrl !== nodeUrl && !cancelled) {
+					console.warn("Relay stream unavailable, falling back to direct node:", err);
+					try {
+						videoHandle = await startWhep(nodeUrl, video);
+						if (cancelled) {
+							void videoHandle.close();
+							return;
+						}
+						whepRef.current = videoHandle;
+						live.value = true;
+						onWhepDead(videoHandle.pc, (hadMedia) => {
+							if (!cancelled) {
+								live.value = false;
+								cleanupWhep();
+								retryTimer = globalThis.setTimeout(connect, hadMedia ? 1500 : 2000);
+							}
+						});
+					} catch {
+						if (!cancelled) retryTimer = globalThis.setTimeout(connect, 2000);
+					}
+					return;
+				}
 				if (!cancelled) {
 					retryTimer = globalThis.setTimeout(connect, 2000);
 				}
@@ -576,7 +603,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			}
 
 			try {
-				audioHandle = await startAudioWhep(nodeUrl);
+				audioHandle = await startAudioWhep(targetUrl);
 				if (audioHandle) {
 					if (cancelled) {
 						void audioHandle.close();
@@ -604,7 +631,7 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 			}
 			cleanupWhep();
 		});
-	}, [nodeUrl, isTurnstilePassed]);
+	}, [nodeUrl, relayUrl, isTurnstilePassed, seats.value.length > 0]);
 
 	useEffect(() => {
 		// deno-lint-ignore no-explicit-any
@@ -1651,6 +1678,12 @@ export default function Play({ nodeUrl, nodeLocked, turnstileSiteKey }: Props) {
 						<dt>Lost</dt>
 						<dd class={stats.value && stats.value.packetsLost > 0 ? "stat-bad" : ""}>
 							{stats.value ? stats.value.packetsLost : "-"}
+						</dd>
+					</div>
+					<div>
+						<dt>Feed</dt>
+						<dd class="stat-good">
+							{seats.value.length > 0 ? "Direct (P)" : (relayUrl ? "Relay" : "Direct")}
 						</dd>
 					</div>
 				</dl>

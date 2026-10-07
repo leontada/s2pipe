@@ -32,10 +32,13 @@ export default {
 	body: (req) => {
 		const fallback = resolveFallback(req);
 		const url = nodeUrl(req.cookies.nodeUrl) || fallback;
+		const isLocal = !url || url.includes("localhost") || url.includes("127.0.0.1") || url.includes("192.168.");
+		const relayUrl = !isLocal ? (Deno.env.get("RELAY_STREAM_URL") || "https://stream.ns-2.online") : undefined;
 		const turnstileSiteKey = Deno.env.get("TURNSTILE_SITE_KEY") || "";
 		return (
 			<Play
 				nodeUrl={url!}
+				relayUrl={relayUrl}
 				nodeLocked={nodeUrlLocked()}
 				turnstileSiteKey={turnstileSiteKey}
 			/>
