@@ -1,6 +1,7 @@
 import { useSignal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { Activity, ArrowDown, Eye, EyeOff, Gamepad2, Home, Keyboard, Lock, Maximize, MessageSquare, Minimize, Pause, Play as PlayIcon, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { Activity, ArrowDown, Eye, EyeOff, Gamepad2, Home, Keyboard, Lock, Maximize, MessageSquare, Mic, MicOff, Minimize, Pause, Play as PlayIcon, Radio, Send, Settings, Shield, Smartphone, Trash2, UserX, Volume2, VolumeX, X, Zap } from "lucide-preact";
+import { voiceManager, type VoiceMode } from "../utils/voice.ts";
 
 import type { AdminState, CaptureStatus, ChatMessage, ClientMessage, PicoStatus, ServerMessage } from "@s2pipe/shared/types/node";
 import { neutralPad, PAD_COUNT, type PadState, samePad } from "@s2pipe/shared/types/pad";
@@ -174,6 +175,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	const stageRef = useRef<HTMLElement>(null);
 	const whepRef = useRef<WhepHandle | null>(null);
 	const audioRef = useRef<AudioWhepHandle | null>(null);
+	const voiceRef = useRef<AudioWhepHandle | null>(null);
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<ReturnType<typeof createInputTracker> | null>(null);
 	const virtualRef = useRef<VirtualPad | null>(null);
@@ -200,6 +202,13 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	const virtualLive = useSignal(false);
 	const muted = useSignal(false);
 	const volume = useSignal(1);
+	const voiceMuted = useSignal(false);
+	const voiceVolume = useSignal(1);
+	const isVoiceActive = useSignal(false);
+	const isTalking = useSignal(false);
+	const voiceRoster = useSignal<Map<number, { seat: number; talking: boolean; muted: boolean }>>(new Map());
+	const voiceMode = useSignal<VoiceMode>(voiceManager.activeMode);
+	const voiceBroadcasting = useSignal(false);
 	const fill = useSignal(false);
 	const showStats = useSignal(false);
 	const stats = useSignal<StreamStats | null>(null);
@@ -560,6 +569,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		let cancelled = false;
 		let videoHandle: WhepHandle | null = null;
 		let audioHandle: AudioWhepHandle | null = null;
+		let voiceHandle: AudioWhepHandle | null = null;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 		let iceHinted = false;
 
@@ -569,10 +579,13 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		const cleanupWhep = () => {
 			void videoHandle?.close();
 			void audioHandle?.close();
+			void voiceHandle?.close();
 			videoHandle = null;
 			audioHandle = null;
+			voiceHandle = null;
 			if (whepRef.current === videoHandle) whepRef.current = null;
 			if (audioRef.current === audioHandle) audioRef.current = null;
+			if (voiceRef.current === voiceHandle) voiceRef.current = null;
 		};
 
 		const connect = async () => {
@@ -642,6 +655,24 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				}
 			} catch {
 				// L'audio peut échouer sans bloquer la vidéo
+			}
+
+			// Espectadores escutam a conversa dos jogadores via WHEP broadcast
+			if (!hasSeat) {
+				try {
+					voiceHandle = await startAudioWhep(activeUrl, "/switch-voice/whep");
+					if (voiceHandle) {
+						if (cancelled) {
+							void voiceHandle.close();
+							return;
+						}
+						voiceRef.current = voiceHandle;
+						voiceHandle.audio.muted = voiceMuted.value;
+						voiceHandle.audio.volume = voiceVolume.value;
+					}
+				} catch {
+					// Voice broadcast pode estar inativo
+				}
 			}
 		};
 
@@ -901,6 +932,12 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 					} else if (msg.op === "privacy_status") {
 						privacyMode.value = msg.data.enabled;
 						toast(msg.data.enabled ? "🔒 Modo Privacidade ativado pelo Administrador." : "🔓 Modo Privacidade desativado.");
+					} else if (msg.op === "voice_signal") {
+						void voiceManager.handleSignal(msg.fromSeat, msg.data);
+					} else if (msg.op === "voice_state") {
+						voiceManager.updateSeatState(msg.seat, msg.talking, msg.muted);
+					} else if (msg.op === "voice_roster") {
+						voiceManager.updateRoster(msg.seats);
 					} else if (msg.op === "ping") {
 						send(socket, { op: "pong" });
 					}
@@ -1185,27 +1222,80 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				showStats.value = !showStats.value;
 			}
 		};
-		globalThis.addEventListener("keydown", onKey);
-		return holdPage(() => globalThis.removeEventListener("keydown", onKey));
+
+		const onKeyDown = (event: KeyboardEvent) => {
+			onKey(event);
+			const target = event.target as HTMLElement | null;
+			if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+			if (event.code === voiceManager.getConfig().pttKey && voiceManager.activeMode === "ptt") {
+				voiceManager.setPttPressed(true);
+			}
+		};
+
+		const onKeyUp = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA")) return;
+			if (event.code === voiceManager.getConfig().pttKey && voiceManager.activeMode === "ptt") {
+				voiceManager.setPttPressed(false);
+			}
+		};
+
+		globalThis.addEventListener("keydown", onKeyDown);
+		globalThis.addEventListener("keyup", onKeyUp);
+		return holdPage(() => {
+			globalThis.removeEventListener("keydown", onKeyDown);
+			globalThis.removeEventListener("keyup", onKeyUp);
+		});
 	}, []);
 
-	// Synchro Volume / Mute (Mutando para o público em Modo Privacidade e Mudo total em Modo Camuflagem)
+	// Sincronização do VoiceManager (Eventos locais, status dos peers e microfone)
+	useEffect(() => {
+		const update = () => {
+			isVoiceActive.value = !voiceManager.isMuted;
+			isTalking.value = voiceManager.isTalking;
+			voiceRoster.value = new Map(voiceManager.roster);
+			voiceMode.value = voiceManager.activeMode;
+			voiceBroadcasting.value = voiceManager.broadcasting;
+		};
+		update();
+		const unsub = voiceManager.subscribe(update);
+		return unsub;
+	}, []);
+
+	// Sincronização da malha de voz com assentos e servidor WebSocket
+	useEffect(() => {
+		voiceManager.syncSession(
+			nodeUrl,
+			(msg) => send(wsRef.current, msg),
+			seats.value,
+			occupied.value,
+		);
+	}, [nodeUrl, seats.value, occupied.value]);
+
+	// Synchro Volume / Mute (Jogo e Vozes)
 	useEffect(() => {
 		if (videoRef.current) videoRef.current.muted = true;
 		const audio = audioRef.current?.audio;
-		if (!audio) return;
-		if (stealthMode.value) {
-			audio.muted = true;
-		} else {
-			const isPrivateForMe = privacyMode.value && !adminAuthed.value;
-			if (isPrivateForMe) {
+		if (audio) {
+			if (stealthMode.value) {
 				audio.muted = true;
 			} else {
-				audio.muted = muted.value;
-				audio.volume = volume.value;
+				const isPrivateForMe = privacyMode.value && !adminAuthed.value;
+				if (isPrivateForMe) {
+					audio.muted = true;
+				} else {
+					audio.muted = muted.value;
+					audio.volume = volume.value;
+				}
 			}
 		}
-	}, [muted.value, volume.value, live.value, privacyMode.value, adminAuthed.value, stealthMode.value]);
+
+		const voiceAudio = voiceRef.current?.audio;
+		if (voiceAudio) {
+			voiceAudio.muted = voiceMuted.value || stealthMode.value;
+			voiceAudio.volume = voiceVolume.value;
+		}
+	}, [muted.value, volume.value, voiceMuted.value, voiceVolume.value, live.value, privacyMode.value, adminAuthed.value, stealthMode.value]);
 
 	// Detecção inteligente de Standby / Console em Repouso
 	useEffect(() => {
@@ -1805,9 +1895,15 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							{Array.from({ length: PAD_COUNT }, (_, idx) => {
 								const isYou = seats.value.includes(idx);
 								const isOcc = occupied.value.includes(idx);
-								const cls = isYou ? "seat-dot seat-dot-you" : isOcc ? "seat-dot seat-dot-occ" : "seat-dot";
+								const vState = voiceRoster.value.get(idx);
+								const isTalk = Boolean(vState?.talking);
+								const cls = isYou
+									? `seat-dot seat-dot-you${isTalk ? " seat-dot-talking" : ""}`
+									: isOcc
+									? `seat-dot seat-dot-occ${isTalk ? " seat-dot-talking" : ""}`
+									: "seat-dot";
 								return (
-									<span key={idx} class={cls} title={`Slot ${idx + 1}: ${isYou ? "You" : isOcc ? "Occupied" : "Free"}`}>
+									<span key={idx} class={cls} title={`Slot ${idx + 1}: ${isYou ? "Você" : isOcc ? "Ocupado" : "Livre"}${isTalk ? " 🎙️ Falando" : ""}`}>
 										{idx + 1}
 									</span>
 								);
@@ -1986,6 +2082,37 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 						>
 							{muted.value ? <VolumeX size={16} /> : <Volume2 size={16} />}
 						</button>
+						{seats.value.length > 0 ? (
+							<button
+								type="button"
+								class="btn btn-icon play-voice-btn"
+								data-talking={isTalking.value ? "true" : undefined}
+								data-muted={isVoiceActive.value ? undefined : "true"}
+								title={voiceMode.value === "ptt"
+									? `Microfone (Push-to-Talk: Segure [V] para falar)`
+									: (isVoiceActive.value ? "Microfone Ativo (Clique para Mutar)" : "Microfone Mutado (Clique para Desmutar)")}
+								onClick={() => {
+									if (!voiceManager.hasMicPermission) {
+										void voiceManager.initMicrophone();
+									} else {
+										voiceManager.toggleMute();
+									}
+								}}
+							>
+								{isVoiceActive.value ? <Mic size={16} /> : <MicOff size={16} />}
+								{voiceMode.value === "ptt" && <span class="voice-ptt-badge">V</span>}
+							</button>
+						) : (
+							<button
+								type="button"
+								class="btn btn-icon"
+								aria-label={voiceMuted.value ? "Desmutar Vozes da Sala" : "Mutar Vozes da Sala"}
+								title={voiceMuted.value ? "Vozes da Sala Mutadas (Clique para ouvir)" : `Vozes da Sala (${Math.round(voiceVolume.value * 100)}%)`}
+								onClick={() => voiceMuted.value = !voiceMuted.value}
+							>
+								{voiceMuted.value ? <MicOff size={16} /> : <Radio size={16} />}
+							</button>
+						)}
 						<button
 							type="button"
 							class="btn btn-icon"
@@ -2185,6 +2312,64 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							onInput={(event) => chatSoundVolume.value = Number((event.target as HTMLInputElement).value)}
 						/>
 					</div>
+
+					<div class="settings-divider" />
+					<h3 class="settings-subtitle">Canal de Voz (Call)</h3>
+
+					<label class="field" htmlFor="setting-voice-volume">
+						<div class="field-header-row">
+							<span>Volume da Call ({Math.round(voiceVolume.value * 100)}%)</span>
+							<button
+								type="button"
+								class="btn btn-xs btn-outline"
+								onClick={() => voiceMuted.value = !voiceMuted.value}
+							>
+								{voiceMuted.value ? "Desmutar" : "Mutar"}
+							</button>
+						</div>
+						<input
+							id="setting-voice-volume"
+							name="voiceVolume"
+							type="range"
+							min="0"
+							max="1"
+							step="0.05"
+							value={voiceVolume.value}
+							onInput={(event) => {
+								voiceVolume.value = Number((event.target as HTMLInputElement).value);
+								if (voiceVolume.value > 0) voiceMuted.value = false;
+							}}
+						/>
+					</label>
+
+					{seats.value.length > 0 && (
+						<div class="field">
+							<span>Modo de Transmissão de Voz</span>
+							<div class="voice-mode-tabs">
+								<button
+									type="button"
+									class="voice-mode-tab"
+									data-active={voiceMode.value === "ptt" ? "true" : undefined}
+									onClick={() => voiceManager.setMode("ptt")}
+								>
+									Push-to-Talk (Tecla [V])
+								</button>
+								<button
+									type="button"
+									class="voice-mode-tab"
+									data-active={voiceMode.value === "vad" ? "true" : undefined}
+									onClick={() => voiceManager.setMode("vad")}
+								>
+									Detecção Contínua (VAD)
+								</button>
+							</div>
+							{voiceBroadcasting.value && (
+								<p class="settings-hint" style="color: #4ade80; font-size: 0.75rem; margin-top: 4px;">
+									✨ Você é o Broadcaster Master (mixando vozes para os espectadores).
+								</p>
+							)}
+						</div>
+					)}
 
 					<div class="settings-divider" />
 					<section class="play-help">

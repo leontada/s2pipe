@@ -1,0 +1,470 @@
+import { startAudioWhip, type WhipHandle } from "./whep.ts";
+import type { ClientMessage, VoiceSeatState } from "@s2pipe/shared/types/node";
+
+export type VoiceMode = "ptt" | "vad";
+
+export type VoiceConfig = {
+	mode: VoiceMode;
+	pttKey: string;
+	echoCancellation: boolean;
+	noiseSuppression: boolean;
+};
+
+const DEFAULT_CONFIG: VoiceConfig = {
+	mode: "ptt",
+	pttKey: "KeyV",
+	echoCancellation: true,
+	noiseSuppression: true,
+};
+
+const ICE_SERVERS: RTCIceServer[] = [
+	{ urls: "stun:stun.l.google.com:19302" },
+	{ urls: "stun:stun1.l.google.com:19302" },
+];
+
+export class VoiceManager {
+	private audioCtx: AudioContext | null = null;
+	private micStream: MediaStream | null = null;
+	private micSource: MediaStreamAudioSourceNode | null = null;
+	private micGain: GainNode | null = null;
+	private micAnalyser: AnalyserNode | null = null;
+	private localDestination: MediaStreamAudioDestinationNode | null = null;
+	private masterDestination: MediaStreamAudioDestinationNode | null = null;
+
+	private peers = new Map<number, RTCPeerConnection>();
+	private peerAudios = new Map<number, HTMLAudioElement>();
+	private peerSources = new Map<number, MediaStreamAudioSourceNode>();
+
+	private whipHandle: WhipHandle | null = null;
+	private isBroadcasting = false;
+
+	private mySeat: number | null = null;
+	private occupiedSeats: number[] = [];
+	private nodeUrl = "";
+
+	private sendWs: ((msg: ClientMessage) => void) | null = null;
+
+	private config: VoiceConfig = { ...DEFAULT_CONFIG };
+	private isPttActive = false;
+	private isToggleMuted = true;
+	private currentTalking = false;
+
+	private vadInterval: number | null = null;
+	private listeners = new Set<() => void>();
+
+	public roster = new Map<number, VoiceSeatState>();
+
+	constructor() {
+		this.loadConfig();
+	}
+
+	private loadConfig(): void {
+		try {
+			const saved = localStorage.getItem("s2pipe_voice_config");
+			if (saved) {
+				this.config = { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+			}
+		} catch {}
+	}
+
+	public saveConfig(config: Partial<VoiceConfig>): void {
+		this.config = { ...this.config, ...config };
+		try {
+			localStorage.setItem("s2pipe_voice_config", JSON.stringify(this.config));
+		} catch {}
+		this.updateGain();
+		this.notify();
+	}
+
+	public getConfig(): VoiceConfig {
+		return { ...this.config };
+	}
+
+	public subscribe(listener: () => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	private notify(): void {
+		for (const l of this.listeners) l();
+	}
+
+	public get activeMode(): VoiceMode {
+		return this.config.mode;
+	}
+
+	public get isMuted(): boolean {
+		if (this.config.mode === "ptt") {
+			return !this.isPttActive;
+		}
+		return this.isToggleMuted;
+	}
+
+	public get isTalking(): boolean {
+		return this.currentTalking;
+	}
+
+	public get broadcasting(): boolean {
+		return this.isBroadcasting;
+	}
+
+	public get hasMicPermission(): boolean {
+		return this.micStream !== null;
+	}
+
+	public setPttPressed(pressed: boolean): void {
+		if (this.config.mode !== "ptt") return;
+		if (this.isPttActive === pressed) return;
+		this.isPttActive = pressed;
+		this.updateGain();
+		this.notify();
+	}
+
+	public toggleMute(): void {
+		if (this.config.mode === "ptt") {
+			this.isPttActive = !this.isPttActive;
+		} else {
+			this.isToggleMuted = !this.isToggleMuted;
+		}
+		this.updateGain();
+		this.notify();
+	}
+
+	public setToggleMuted(muted: boolean): void {
+		this.isToggleMuted = muted;
+		this.updateGain();
+		this.notify();
+	}
+
+	public setMode(mode: VoiceMode): void {
+		this.saveConfig({ mode });
+		if (mode === "ptt") {
+			this.isPttActive = false;
+		} else {
+			this.isToggleMuted = false;
+		}
+		this.updateGain();
+		this.notify();
+	}
+
+	public async initMicrophone(): Promise<boolean> {
+		if (this.micStream) return true;
+
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: this.config.echoCancellation,
+					noiseSuppression: this.config.noiseSuppression,
+					autoGainControl: true,
+				},
+			});
+
+			this.micStream = stream;
+			const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+			const ctx = new AudioContextClass();
+			this.audioCtx = ctx;
+
+			this.micSource = ctx.createMediaStreamSource(stream);
+			this.micGain = ctx.createGain();
+			this.micAnalyser = ctx.createAnalyser();
+			this.micAnalyser.fftSize = 256;
+
+			this.localDestination = ctx.createMediaStreamDestination();
+			this.masterDestination = ctx.createMediaStreamDestination();
+
+			this.micSource.connect(this.micGain);
+			this.micGain.connect(this.micAnalyser);
+			this.micGain.connect(this.localDestination);
+			this.micGain.connect(this.masterDestination);
+
+			this.updateGain();
+			this.startVad();
+			this.reconnectPeers();
+			this.notify();
+			return true;
+		} catch (err) {
+			console.warn("[Voice] Microphone access failed or denied:", err);
+			return false;
+		}
+	}
+
+	private updateGain(): void {
+		if (!this.micGain) return;
+		const muted = this.isMuted;
+		this.micGain.gain.setTargetAtTime(muted ? 0.0 : 1.0, this.audioCtx?.currentTime ?? 0, 0.01);
+
+		if (muted && this.currentTalking) {
+			this.currentTalking = false;
+			this.broadcastVoiceState();
+		}
+	}
+
+	private startVad(): void {
+		if (this.vadInterval) clearInterval(this.vadInterval);
+		const dataArray = new Uint8Array(this.micAnalyser?.frequencyBinCount ?? 128);
+
+		this.vadInterval = window.setInterval(() => {
+			if (!this.micAnalyser || this.isMuted) {
+				if (this.currentTalking) {
+					this.currentTalking = false;
+					this.broadcastVoiceState();
+					this.notify();
+				}
+				return;
+			}
+
+			this.micAnalyser.getByteFrequencyData(dataArray);
+			let sum = 0;
+			for (let i = 0; i < dataArray.length; i++) {
+				sum += dataArray[i];
+			}
+			const average = sum / dataArray.length;
+			const talking = average > 18;
+
+			if (talking !== this.currentTalking) {
+				this.currentTalking = talking;
+				this.broadcastVoiceState();
+				this.notify();
+			}
+		}, 60);
+	}
+
+	private broadcastVoiceState(): void {
+		if (this.mySeat === null || !this.sendWs) return;
+		this.sendWs({
+			op: "voice_state",
+			talking: this.currentTalking,
+			muted: this.isMuted,
+		});
+	}
+
+	public syncSession(
+		nodeUrl: string,
+		sendWs: (msg: ClientMessage) => void,
+		mySeats: number[],
+		occupied: number[],
+	): void {
+		this.nodeUrl = nodeUrl;
+		this.sendWs = sendWs;
+		this.occupiedSeats = [...occupied].sort((a, b) => a - b);
+		const prevSeat = this.mySeat;
+		this.mySeat = mySeats.length > 0 ? mySeats[0] : null;
+
+		if (this.mySeat !== null && !this.micStream) {
+			void this.initMicrophone();
+		}
+
+		if (prevSeat !== this.mySeat) {
+			this.reconnectPeers();
+		} else {
+			this.updateMeshTopology();
+		}
+
+		this.checkBroadcasterRole();
+	}
+
+	private reconnectPeers(): void {
+		this.closeAllPeers();
+		this.updateMeshTopology();
+	}
+
+	private closeAllPeers(): void {
+		for (const [_seat, pc] of this.peers) {
+			pc.close();
+		}
+		this.peers.clear();
+
+		for (const [_seat, audio] of this.peerAudios) {
+			audio.pause();
+			audio.srcObject = null;
+		}
+		this.peerAudios.clear();
+		this.peerSources.clear();
+	}
+
+	private updateMeshTopology(): void {
+		if (this.mySeat === null || !this.localDestination) return;
+
+		const targetSeats = this.occupiedSeats.filter((s) => s !== this.mySeat);
+
+		for (const [seat, pc] of this.peers) {
+			if (!targetSeats.includes(seat)) {
+				pc.close();
+				this.peers.delete(seat);
+				const audio = this.peerAudios.get(seat);
+				if (audio) {
+					audio.pause();
+					audio.srcObject = null;
+					this.peerAudios.delete(seat);
+				}
+				this.peerSources.delete(seat);
+			}
+		}
+
+		for (const otherSeat of targetSeats) {
+			if (!this.peers.has(otherSeat)) {
+				if (this.mySeat < otherSeat) {
+					void this.initiatePeerConnection(otherSeat);
+				}
+			}
+		}
+	}
+
+	private createPeer(targetSeat: number): RTCPeerConnection {
+		const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+		this.peers.set(targetSeat, pc);
+
+		if (this.localDestination) {
+			for (const track of this.localDestination.stream.getAudioTracks()) {
+				pc.addTrack(track, this.localDestination.stream);
+			}
+		}
+
+		pc.onicecandidate = (event) => {
+			if (event.candidate && this.sendWs) {
+				this.sendWs({
+					op: "voice_signal",
+					toSeat: targetSeat,
+					data: { type: "candidate", candidate: event.candidate },
+				});
+			}
+		};
+
+		pc.ontrack = (event) => {
+			const stream = event.streams[0] || new MediaStream([event.track]);
+
+			let audio = this.peerAudios.get(targetSeat);
+			if (!audio) {
+				audio = new Audio();
+				audio.autoplay = true;
+				this.peerAudios.set(targetSeat, audio);
+			}
+			audio.srcObject = stream;
+			void audio.play().catch(() => {});
+
+			if (this.audioCtx && this.masterDestination && !this.peerSources.has(targetSeat)) {
+				try {
+					const source = this.audioCtx.createMediaStreamSource(stream);
+					source.connect(this.masterDestination);
+					this.peerSources.set(targetSeat, source);
+				} catch (err) {
+					console.warn("[Voice] Error attaching peer to master mixer:", err);
+				}
+			}
+		};
+
+		return pc;
+	}
+
+	private async initiatePeerConnection(targetSeat: number): Promise<void> {
+		const pc = this.createPeer(targetSeat);
+		const offer = await pc.createOffer();
+		await pc.setLocalDescription(offer);
+
+		if (this.sendWs) {
+			this.sendWs({
+				op: "voice_signal",
+				toSeat: targetSeat,
+				data: { type: "offer", sdp: offer.sdp },
+			});
+		}
+	}
+
+	public async handleSignal(fromSeat: number, data: any): Promise<void> {
+		if (this.mySeat === null) return;
+
+		let pc = this.peers.get(fromSeat);
+
+		if (data?.type === "offer") {
+			if (!pc) pc = this.createPeer(fromSeat);
+			await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.sdp }));
+			const answer = await pc.createAnswer();
+			await pc.setLocalDescription(answer);
+
+			if (this.sendWs) {
+				this.sendWs({
+					op: "voice_signal",
+					toSeat: fromSeat,
+					data: { type: "answer", sdp: answer.sdp },
+				});
+			}
+		} else if (data?.type === "answer") {
+			if (pc) {
+				await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.sdp }));
+			}
+		} else if (data?.type === "candidate" && data.candidate) {
+			if (pc) {
+				await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+			}
+		}
+	}
+
+	private checkBroadcasterRole(): void {
+		const leaderSeat = this.occupiedSeats.length > 0 ? this.occupiedSeats[0] : null;
+		const shouldBroadcast = this.mySeat !== null && this.mySeat === leaderSeat;
+
+		if (shouldBroadcast && !this.isBroadcasting) {
+			this.startBroadcast();
+		} else if (!shouldBroadcast && this.isBroadcasting) {
+			this.stopBroadcast();
+		}
+	}
+
+	private async startBroadcast(): Promise<void> {
+		if (!this.masterDestination || !this.nodeUrl) return;
+		this.isBroadcasting = true;
+		this.notify();
+
+		try {
+			this.whipHandle = await startAudioWhip(
+				this.nodeUrl,
+				this.masterDestination.stream,
+				"/switch-voice/whip",
+			);
+		} catch (err) {
+			console.warn("[Voice] WHIP broadcast failed:", err);
+			this.isBroadcasting = false;
+			this.notify();
+		}
+	}
+
+	private stopBroadcast(): void {
+		if (this.whipHandle) {
+			void this.whipHandle.close();
+			this.whipHandle = null;
+		}
+		this.isBroadcasting = false;
+		this.notify();
+	}
+
+	public updateRoster(seats: VoiceSeatState[]): void {
+		this.roster.clear();
+		for (const s of seats) {
+			this.roster.set(s.seat, s);
+		}
+		this.notify();
+	}
+
+	public updateSeatState(seat: number, talking: boolean, muted: boolean): void {
+		this.roster.set(seat, { seat, talking, muted });
+		this.notify();
+	}
+
+	public destroy(): void {
+		if (this.vadInterval) clearInterval(this.vadInterval);
+		this.stopBroadcast();
+		this.closeAllPeers();
+
+		if (this.micStream) {
+			for (const t of this.micStream.getTracks()) t.stop();
+			this.micStream = null;
+		}
+		if (this.audioCtx) {
+			void this.audioCtx.close();
+			this.audioCtx = null;
+		}
+		this.listeners.clear();
+	}
+}
+
+export const voiceManager = new VoiceManager();

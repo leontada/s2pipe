@@ -139,7 +139,10 @@ export async function startWhep(nodeUrl: string, video: HTMLVideoElement): Promi
 	};
 }
 
-export async function startAudioWhep(nodeUrl: string): Promise<AudioWhepHandle | null> {
+export async function startAudioWhep(
+	nodeUrl: string,
+	path = "/switch-audio/whep",
+): Promise<AudioWhepHandle | null> {
 	const pc = new RTCPeerConnection(ice);
 	const audio = new Audio();
 	audio.autoplay = true;
@@ -151,7 +154,7 @@ export async function startAudioWhep(nodeUrl: string): Promise<AudioWhepHandle |
 		void audio.play().catch(() => {});
 	});
 
-	const location = await postWhep(nodeUrl, "/switch-audio/whep", pc);
+	const location = await postWhep(nodeUrl, path, pc);
 	if (!pc.remoteDescription) {
 		audio.pause();
 		return null;
@@ -168,6 +171,56 @@ export async function startAudioWhep(nodeUrl: string): Promise<AudioWhepHandle |
 		},
 	};
 }
+
+export type WhipHandle = {
+	pc: RTCPeerConnection;
+	close: () => Promise<void>;
+};
+
+export async function startAudioWhip(
+	nodeUrl: string,
+	stream: MediaStream,
+	path = "/switch-voice/whip",
+): Promise<WhipHandle | null> {
+	const pc = new RTCPeerConnection(ice);
+	for (const track of stream.getAudioTracks()) {
+		pc.addTrack(track, stream);
+	}
+	const offer = await pc.createOffer();
+	await pc.setLocalDescription(offer);
+
+	const url = `${nodeUrl}${path}`;
+	let location: string | null = null;
+	try {
+		const res = await fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/sdp" },
+			body: offer.sdp,
+		});
+		if (!res.ok) {
+			pc.close();
+			return null;
+		}
+		const answerSdp = await res.text();
+		await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+		location = res.headers.get("location");
+	} catch {
+		pc.close();
+		return null;
+	}
+
+	return {
+		pc,
+		close: async () => {
+			pc.close();
+			if (location) {
+				const deleteUrl = location.startsWith("http") ? location : `${nodeUrl}${location}`;
+				await fetch(deleteUrl, { method: "DELETE" }).catch(() => {});
+			}
+		},
+	};
+}
+
 
 export type StreamStats = {
 	bitrateKbps: number;

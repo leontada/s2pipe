@@ -32,6 +32,8 @@ paths:
     source: publisher
   switch-audio:
     source: publisher
+  switch-voice:
+    source: publisher
 EOF
 
 # 2. Start MediaMTX

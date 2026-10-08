@@ -41,4 +41,11 @@ export default new Router()
 	.delete("/switch/whep/:session", forward)
 	.post("/switch-audio/whep", forward)
 	.patch("/switch-audio/whep/:session", forward)
-	.delete("/switch-audio/whep/:session", forward);
+	.delete("/switch-audio/whep/:session", forward)
+	.post("/switch-voice/whep", forward)
+	.patch("/switch-voice/whep/:session", forward)
+	.delete("/switch-voice/whep/:session", forward)
+	.post("/switch-voice/whip", forward)
+	.patch("/switch-voice/whip/:session", forward)
+	.delete("/switch-voice/whip/:session", forward);
+

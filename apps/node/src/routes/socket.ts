@@ -6,7 +6,9 @@ import {
 	addViewer,
 	dropViewer,
 	forEachViewer,
+	getSeatSocket,
 	getSeatStates,
+	getVoiceRoster,
 	isAllMuted,
 	isSeatMuted,
 	kickAllSeats,
@@ -17,8 +19,10 @@ import {
 	padsOf,
 	playingCount,
 	playPads,
+	resetVoiceState,
 	setAllMuted,
 	setSeatMuted,
+	setVoiceState,
 	viewerCount,
 	watchPads,
 } from "@/services/sockets.ts";
@@ -95,7 +99,12 @@ async function pushStatus(): Promise<void> {
 
 function resetSeats(indices: number[]): void {
 	if (!indices.length) return;
-	for (const seat of indices) clearPad(seat);
+	for (const seat of indices) {
+		clearPad(seat);
+		resetVoiceState(seat);
+	}
+	const rosterMsg: ServerMessage = { op: "voice_roster", seats: getVoiceRoster() };
+	forEachViewer((v) => send(v, rosterMsg));
 	void pushStatus();
 }
 
@@ -117,6 +126,7 @@ function bind(ws: WebSocket): void {
 
 	const greet = () => {
 		void currentStatus().then((status) => send(ws, status));
+		send(ws, { op: "voice_roster", seats: getVoiceRoster() });
 		const userNick = getSocketNick(ws);
 		send(ws, {
 			op: "chat_init",
@@ -552,6 +562,33 @@ function bind(ws: WebSocket): void {
 					});
 					pushAdminState();
 					void pushStatus();
+					return;
+				}
+				case "voice_signal": {
+					const senderSeat = padOf(ws);
+					if (senderSeat === undefined) return;
+					const targetWs = getSeatSocket(msg.toSeat);
+					if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+						send(targetWs, {
+							op: "voice_signal",
+							fromSeat: senderSeat,
+							toSeat: msg.toSeat,
+							data: msg.data,
+						});
+					}
+					return;
+				}
+				case "voice_state": {
+					const senderSeat = padOf(ws);
+					if (senderSeat === undefined) return;
+					setVoiceState(senderSeat, Boolean(msg.talking), Boolean(msg.muted));
+					const voiceUpdate: ServerMessage = {
+						op: "voice_state",
+						seat: senderSeat,
+						talking: Boolean(msg.talking),
+						muted: Boolean(msg.muted),
+					};
+					forEachViewer((v) => send(v, voiceUpdate));
 					return;
 				}
 			}

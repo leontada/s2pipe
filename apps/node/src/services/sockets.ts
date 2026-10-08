@@ -145,3 +145,35 @@ export function getSeatStates(): { seat: number; occupied: boolean; muted: boole
 	}));
 }
 
+const voiceTalking: boolean[] = Array.from({ length: PAD_COUNT }, () => false);
+const voiceMuted: boolean[] = Array.from({ length: PAD_COUNT }, () => true);
+
+export function setVoiceState(seat: number, talking: boolean, muted: boolean): void {
+	if (seat >= 0 && seat < PAD_COUNT) {
+		voiceTalking[seat] = talking;
+		voiceMuted[seat] = muted;
+	}
+}
+
+export function resetVoiceState(seat: number): void {
+	if (seat >= 0 && seat < PAD_COUNT) {
+		voiceTalking[seat] = false;
+		voiceMuted[seat] = true;
+	}
+}
+
+export function getVoiceRoster(): { seat: number; talking: boolean; muted: boolean }[] {
+	const out: { seat: number; talking: boolean; muted: boolean }[] = [];
+	for (let i = 0; i < seats.length; i++) {
+		if (seats[i] !== null) {
+			out.push({
+				seat: i,
+				talking: voiceTalking[i],
+				muted: voiceMuted[i],
+			});
+		}
+	}
+	return out;
+}
+
+

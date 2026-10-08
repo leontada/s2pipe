@@ -53,6 +53,12 @@ export type ChatMessage = {
 	isSystem?: boolean;
 };
 
+export type VoiceSeatState = {
+	seat: number;
+	talking: boolean;
+	muted: boolean;
+};
+
 export type ClientMessage =
 	| { op: "play"; data?: { count?: number }; pin?: string }
 	| { op: "watch" }
@@ -69,7 +75,9 @@ export type ClientMessage =
 	| { op: "admin_clear_chat" }
 	| { op: "admin_toggle_privacy"; enabled: boolean }
 	| { op: "chat_send"; text: string }
-	| { op: "chat_nick"; nick: string; silent?: boolean };
+	| { op: "chat_nick"; nick: string; silent?: boolean }
+	| { op: "voice_signal"; toSeat: number; data: unknown }
+	| { op: "voice_state"; talking: boolean; muted: boolean };
 
 export type ServerMessage =
 	| { op: "status"; data: StatusData }
@@ -85,4 +93,8 @@ export type ServerMessage =
 	| { op: "chat_nick_ack"; data: { nick: string; success: boolean; error?: string } }
 	| { op: "chat_status"; data: { enabled: boolean } }
 	| { op: "chat_cleared"; data: { history: ChatMessage[] } }
-	| { op: "privacy_status"; data: { enabled: boolean } };
+	| { op: "privacy_status"; data: { enabled: boolean } }
+	| { op: "voice_signal"; fromSeat: number; toSeat: number; data: unknown }
+	| { op: "voice_state"; seat: number; talking: boolean; muted: boolean }
+	| { op: "voice_roster"; seats: VoiceSeatState[] };
+
