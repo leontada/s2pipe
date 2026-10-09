@@ -149,6 +149,9 @@ export class VoiceManager {
 		} else {
 			this.isToggleMuted = false;
 		}
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			void this.audioCtx.resume().catch(() => {});
+		}
 		this.updateGain();
 		this.notify();
 	}
@@ -183,6 +186,10 @@ export class VoiceManager {
 			this.micGain.connect(this.localDestination);
 			this.micGain.connect(this.masterDestination);
 
+			if (ctx.state === "suspended") {
+				void ctx.resume().catch(() => {});
+			}
+
 			this.updateGain();
 			this.startVad();
 			this.reconnectPeers();
@@ -198,7 +205,20 @@ export class VoiceManager {
 	private updateGain(): void {
 		if (!this.micGain) return;
 		const muted = this.isMuted;
-		this.micGain.gain.setTargetAtTime(muted ? 0.0 : 1.0, this.audioCtx?.currentTime ?? 0, 0.01);
+		const target = muted ? 0.0 : 1.0;
+		if (this.audioCtx && this.audioCtx.state === "running") {
+			try {
+				this.micGain.gain.cancelScheduledValues(this.audioCtx.currentTime);
+				this.micGain.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.01);
+			} catch {
+				this.micGain.gain.value = target;
+			}
+		} else {
+			this.micGain.gain.value = target;
+			if (this.audioCtx && this.audioCtx.state === "suspended" && !muted) {
+				void this.audioCtx.resume().catch(() => {});
+			}
+		}
 
 		if (muted && this.currentTalking) {
 			this.currentTalking = false;
@@ -259,6 +279,10 @@ export class VoiceManager {
 
 		if (this.mySeat !== null && !this.micStream) {
 			void this.initMicrophone();
+		}
+
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			void this.audioCtx.resume().catch(() => {});
 		}
 
 		if (prevSeat !== this.mySeat) {
@@ -419,6 +443,9 @@ export class VoiceManager {
 
 	private async startBroadcast(): Promise<void> {
 		if (!this.masterDestination || !this.nodeUrl) return;
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			await this.audioCtx.resume().catch(() => {});
+		}
 		this.isBroadcasting = true;
 		this.notify();
 

@@ -147,6 +147,11 @@ export async function startAudioWhep(
 	const audio = new Audio();
 	audio.autoplay = true;
 	audio.setAttribute("playsinline", "true");
+	audio.style.display = "none";
+	try {
+		document.body.appendChild(audio);
+	} catch {}
+
 	pc.addTransceiver("audio", { direction: "recvonly" });
 	pc.addEventListener("track", (event) => {
 		if (event.track.kind !== "audio") return;
@@ -158,6 +163,7 @@ export async function startAudioWhep(
 	const location = await postWhep(nodeUrl, path, pc);
 	if (!pc.remoteDescription) {
 		audio.pause();
+		try { audio.remove(); } catch {}
 		return null;
 	}
 
@@ -168,6 +174,7 @@ export async function startAudioWhep(
 		close: async () => {
 			audio.pause();
 			audio.srcObject = null;
+			try { audio.remove(); } catch {}
 			await close();
 		},
 	};
@@ -185,10 +192,12 @@ export async function startAudioWhip(
 ): Promise<WhipHandle | null> {
 	const pc = new RTCPeerConnection(ice);
 	for (const track of stream.getAudioTracks()) {
+		track.enabled = true;
 		pc.addTrack(track, stream);
 	}
 	const offer = await pc.createOffer();
 	await pc.setLocalDescription(offer);
+	await waitIceGathering(pc);
 
 	const url = `${nodeUrl}${path}`;
 	let location: string | null = null;
@@ -196,7 +205,7 @@ export async function startAudioWhip(
 		const res = await fetch(url, {
 			method: "POST",
 			headers: { "Content-Type": "application/sdp" },
-			body: offer.sdp,
+			body: pc.localDescription?.sdp ?? offer.sdp,
 		});
 		if (!res.ok) {
 			pc.close();
