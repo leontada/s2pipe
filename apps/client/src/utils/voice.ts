@@ -186,6 +186,17 @@ export class VoiceManager {
 			this.micGain.connect(this.localDestination);
 			this.micGain.connect(this.masterDestination);
 
+			// CORREÇÃO CRUCIAL PARA CHROMIUM/BRAVE/EDGE:
+			// Em navegadores Chromium, se um AudioContext não tiver NENHUM nó conectado ao `ctx.destination`,
+			// o motor Blink suspende a renderização de quantums de áudio para nós `MediaStreamAudioDestinationNode`,
+			// resultando em silêncio digital absoluto (-91 dB) transmitido no WebRTC!
+			// Conectamos um GainNode com volume 0 ao destination para forçar o loop de renderização do Chromium
+			// sem reproduzir o microfone no autofalante local do usuário.
+			const dummyGain = ctx.createGain();
+			dummyGain.gain.value = 0;
+			this.micGain.connect(dummyGain);
+			dummyGain.connect(ctx.destination);
+
 			if (ctx.state === "suspended") {
 				void ctx.resume().catch(() => {});
 			}
@@ -507,6 +518,51 @@ export class VoiceManager {
 		}
 	}
 
+	public async getDiagnostics(): Promise<Record<string, unknown>> {
+		let whipStats: Record<string, unknown> | null = null;
+		if (this.whipHandle?.pc) {
+			try {
+				const stats = await this.whipHandle.pc.getStats();
+				for (const report of stats.values()) {
+					if (report.type === "outbound-rtp" && report.kind === "audio") {
+						whipStats = {
+							bytesSent: report.bytesSent,
+							packetsSent: report.packetsSent,
+						};
+					}
+				}
+			} catch {}
+		}
+
+		let currentLevelPercent = 0;
+		if (this.micAnalyser) {
+			const buf = new Uint8Array(this.micAnalyser.frequencyBinCount);
+			this.micAnalyser.getByteFrequencyData(buf);
+			let sum = 0;
+			for (let i = 0; i < buf.length; i++) sum += buf[i];
+			const avg = sum / buf.length;
+			currentLevelPercent = Math.round((avg / 255) * 100);
+		}
+
+		return {
+			role: this.mySeat !== null ? `Player (Seat ${this.mySeat + 1})` : "Spectator",
+			broadcaster: this.isBroadcasting ? "Active (WHIP)" : "Inactive",
+			mode: this.config.mode,
+			isMuted: this.isMuted,
+			isTalking: this.currentTalking,
+			inputLevelPercent: `${currentLevelPercent}%`,
+			audioContextState: this.audioCtx?.state ?? "none",
+			audioContextTime: this.audioCtx ? `${this.audioCtx.currentTime.toFixed(1)}s` : "-",
+			micStreamActive: this.micStream?.active ?? false,
+			micTrackEnabled: this.micStream?.getAudioTracks()[0]?.enabled ?? false,
+			micGainValue: this.micGain?.gain.value ?? "-",
+			whipConnectionState: this.whipHandle?.pc.connectionState ?? "-",
+			whipIceState: this.whipHandle?.pc.iceConnectionState ?? "-",
+			whipStats: whipStats ?? "no stats yet",
+			peerConnections: this.peers.size,
+		};
+	}
+
 	public destroy(): void {
 		if (this.vadInterval) clearInterval(this.vadInterval);
 		this.stopBroadcast();
@@ -525,3 +581,15 @@ export class VoiceManager {
 }
 
 export const voiceManager = new VoiceManager();
+
+if (typeof globalThis !== "undefined") {
+	// deno-lint-ignore no-explicit-any
+	const g = globalThis as any;
+	g.__voiceManager = voiceManager;
+	g.__voiceDebug = async () => {
+		const diag = await voiceManager.getDiagnostics();
+		console.log("%c=== [Voice] DIAGNÓSTICO DO MICROFONE / WHIP ===", "color: #00ff88; font-weight: bold; font-size: 14px;");
+		console.table(diag);
+		return diag;
+	};
+}

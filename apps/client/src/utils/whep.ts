@@ -154,14 +154,20 @@ export async function startAudioWhep(
 
 	pc.addTransceiver("audio", { direction: "recvonly" });
 	pc.addEventListener("track", (event) => {
+		console.log(`%c[WHEP] Audio track received for ${path} (kind=${event.track.kind}, id=${event.track.id})`, "color: #00bbff; font-weight: bold;");
 		if (event.track.kind !== "audio") return;
 		if (event.receiver) preferLowJitter(event.receiver);
 		audio.srcObject = new MediaStream([event.track]);
-		void audio.play().catch(() => {});
+		void audio.play().then(() => {
+			console.log(`%c[WHEP] Audio playback STARTED for ${path}`, "color: #00ff88; font-weight: bold;");
+		}).catch((err) => {
+			console.warn(`[WHEP] Autoplay blocked for ${path}:`, err);
+		});
 	});
 
 	const location = await postWhep(nodeUrl, path, pc);
 	if (!pc.remoteDescription) {
+		console.warn(`[WHEP] Failed remoteDescription for ${path}`);
 		audio.pause();
 		try { audio.remove(); } catch {}
 		return null;
@@ -193,6 +199,7 @@ export async function startAudioWhip(
 	const pc = new RTCPeerConnection(ice);
 	for (const track of stream.getAudioTracks()) {
 		track.enabled = true;
+		console.log(`%c[WHIP] Adding audio track ${track.id} (${track.label}) to WHIP`, "color: #ffaa00; font-weight: bold;");
 		pc.addTrack(track, stream);
 	}
 	const offer = await pc.createOffer();
@@ -202,19 +209,23 @@ export async function startAudioWhip(
 	const url = `${nodeUrl}${path}`;
 	let location: string | null = null;
 	try {
+		console.log(`%c[WHIP] POST offer to ${url}`, "color: #ffaa00;");
 		const res = await fetch(url, {
 			method: "POST",
 			headers: { "Content-Type": "application/sdp" },
 			body: pc.localDescription?.sdp ?? offer.sdp,
 		});
 		if (!res.ok) {
+			console.warn(`[WHIP] Offer rejected: ${res.status} ${res.statusText}`);
 			pc.close();
 			return null;
 		}
 		const answerSdp = await res.text();
 		await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 		location = res.headers.get("location");
-	} catch {
+		console.log(`%c[WHIP] Broadcast connected successfully! Resource=${location}`, "color: #00ff88; font-weight: bold;");
+	} catch (err) {
+		console.warn(`[WHIP] Connection failed:`, err);
 		pc.close();
 		return null;
 	}

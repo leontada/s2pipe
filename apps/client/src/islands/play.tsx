@@ -1357,6 +1357,67 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		});
 	}, [muted.value, voiceMuted.value, stealthMode.value]);
 
+	// Ferramenta de diagnóstico rápido WHEP para o console F12
+	useEffect(() => {
+		// deno-lint-ignore no-explicit-any
+		const g = globalThis as any;
+		g.__whepDebug = async () => {
+			const vPc = voiceRef.current?.pc;
+			const aPc = audioRef.current?.pc;
+			let voiceBytesReceived = 0;
+			let audioBytesReceived = 0;
+			if (vPc) {
+				try {
+					const s = await vPc.getStats();
+					for (const report of s.values()) {
+						if (report.type === "inbound-rtp") {
+							voiceBytesReceived = report.bytesReceived ?? 0;
+						}
+					}
+				} catch {}
+			}
+			if (aPc) {
+				try {
+					const s = await aPc.getStats();
+					for (const report of s.values()) {
+						if (report.type === "inbound-rtp") {
+							audioBytesReceived = report.bytesReceived ?? 0;
+						}
+					}
+				} catch {}
+			}
+			const report = {
+				role: seats.value.length > 0 ? `Player (${seats.value.map((s: number) => `P${s + 1}`).join(",")})` : "Viewer",
+				activeFeed: activeFeed.value,
+				gameAudio: {
+					connected: Boolean(audioRef.current),
+					pcState: audioRef.current?.pc.connectionState ?? "-",
+					iceState: audioRef.current?.pc.iceConnectionState ?? "-",
+					bytesReceived: audioBytesReceived,
+					paused: audioRef.current?.audio.paused ?? "-",
+					muted: audioRef.current?.audio.muted ?? "-",
+					volume: `${Math.round((audioRef.current?.audio.volume ?? 0) * 100)}%`,
+				},
+				voiceAudio: {
+					connected: Boolean(voiceRef.current),
+					pcState: voiceRef.current?.pc.connectionState ?? "-",
+					iceState: voiceRef.current?.pc.iceConnectionState ?? "-",
+					bytesReceived: voiceBytesReceived,
+					paused: voiceRef.current?.audio.paused ?? "-",
+					muted: voiceRef.current?.audio.muted ?? "-",
+					volume: `${Math.round((voiceRef.current?.audio.volume ?? 0) * 100)}%`,
+				},
+			};
+			console.log("%c=== [WHEP] DIAGNÓSTICO DO ÁUDIO RECEBIDO ===", "color: #00bbff; font-weight: bold; font-size: 14px;");
+			console.table(report);
+			return report;
+		};
+
+		return holdPage(() => {
+			delete g.__whepDebug;
+		});
+	}, []);
+
 	// Detecção inteligente de Standby / Console em Repouso
 	useEffect(() => {
 		let canvas: HTMLCanvasElement | null = null;
@@ -1882,6 +1943,14 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 						<dt>Feed</dt>
 						<dd class="stat-good">
 							{activeFeed.value}
+						</dd>
+					</div>
+					<div>
+						<dt>Call</dt>
+						<dd class={seats.value.length > 0 ? (voiceBroadcasting.value ? "stat-good" : "stat-warn") : (voiceRef.current ? "stat-good" : "stat-warn")}>
+							{seats.value.length > 0
+								? (voiceBroadcasting.value ? (isTalking.value ? "🎙️ Falando" : (isVoiceActive.value ? "Online (Mudo)" : "PTT Espera")) : "Conectando...")
+								: (voiceRef.current ? (voiceMuted.value ? "Mutado" : `Ouvindo (${Math.round(voiceVolume.value * 100)}%)`) : "Sem sinal")}
 						</dd>
 					</div>
 				</dl>
