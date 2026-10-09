@@ -98,11 +98,11 @@ export function onWhepDead(pc: RTCPeerConnection, fn: (hadMedia: boolean) => voi
 			}
 			return;
 		}
-		if (state === "failed") fire();
+		if (state === "failed" || state === "closed") fire();
 		if (state !== "disconnected" || timer) return;
 		timer = setTimeout(() => {
 			timer = null;
-			if (pc.connectionState === "disconnected" || pc.connectionState === "failed") fire();
+			if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.connectionState === "closed") fire();
 		}, 1500);
 	};
 

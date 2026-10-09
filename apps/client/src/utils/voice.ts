@@ -37,6 +37,7 @@ export class VoiceManager {
 
 	private whipHandle: WhipHandle | null = null;
 	private isBroadcasting = false;
+	private micInitPromise: Promise<boolean> | null = null;
 
 	private mySeat: number | null = null;
 	private occupiedSeats: number[] = [];
@@ -158,59 +159,66 @@ export class VoiceManager {
 
 	public async initMicrophone(): Promise<boolean> {
 		if (this.micStream) return true;
+		if (this.micInitPromise) return this.micInitPromise;
 
-		try {
-			const stream = await navigator.mediaDevices.getUserMedia({
-				audio: {
-					echoCancellation: this.config.echoCancellation,
-					noiseSuppression: this.config.noiseSuppression,
-					autoGainControl: true,
-				},
-			});
+		this.micInitPromise = (async () => {
+			try {
+				const stream = await navigator.mediaDevices.getUserMedia({
+					audio: {
+						echoCancellation: this.config.echoCancellation,
+						noiseSuppression: this.config.noiseSuppression,
+						autoGainControl: true,
+					},
+				});
 
-			this.micStream = stream;
-			const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-			const ctx = new AudioContextClass();
-			this.audioCtx = ctx;
+				this.micStream = stream;
+				const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+				const ctx = new AudioContextClass();
+				this.audioCtx = ctx;
 
-			this.micSource = ctx.createMediaStreamSource(stream);
-			this.micGain = ctx.createGain();
-			this.micAnalyser = ctx.createAnalyser();
-			this.micAnalyser.fftSize = 256;
+				this.micSource = ctx.createMediaStreamSource(stream);
+				this.micGain = ctx.createGain();
+				this.micAnalyser = ctx.createAnalyser();
+				this.micAnalyser.fftSize = 256;
 
-			this.localDestination = ctx.createMediaStreamDestination();
-			this.masterDestination = ctx.createMediaStreamDestination();
+				this.localDestination = ctx.createMediaStreamDestination();
+				this.masterDestination = ctx.createMediaStreamDestination();
 
-			this.micSource.connect(this.micGain);
-			this.micGain.connect(this.micAnalyser);
-			this.micGain.connect(this.localDestination);
-			this.micGain.connect(this.masterDestination);
+				this.micSource.connect(this.micGain);
+				this.micGain.connect(this.micAnalyser);
+				this.micGain.connect(this.localDestination);
+				this.micGain.connect(this.masterDestination);
 
-			// CORREÇÃO CRUCIAL PARA CHROMIUM/BRAVE/EDGE:
-			// Em navegadores Chromium, se um AudioContext não tiver NENHUM nó conectado ao `ctx.destination`,
-			// o motor Blink suspende a renderização de quantums de áudio para nós `MediaStreamAudioDestinationNode`,
-			// resultando em silêncio digital absoluto (-91 dB) transmitido no WebRTC!
-			// Conectamos um GainNode com volume 0 ao destination para forçar o loop de renderização do Chromium
-			// sem reproduzir o microfone no autofalante local do usuário.
-			const dummyGain = ctx.createGain();
-			dummyGain.gain.value = 0;
-			this.micGain.connect(dummyGain);
-			dummyGain.connect(ctx.destination);
+				// CORREÇÃO CRUCIAL PARA CHROMIUM/BRAVE/EDGE:
+				// Em navegadores Chromium, se um AudioContext não tiver NENHUM nó conectado ao `ctx.destination`,
+				// o motor Blink suspende a renderização de quantums de áudio para nós `MediaStreamAudioDestinationNode`,
+				// resultando em silêncio digital absoluto (-91 dB) transmitido no WebRTC!
+				// Conectamos um GainNode com volume 0 ao destination para forçar o loop de renderização do Chromium
+				// sem reproduzir o microfone no autofalante local do usuário.
+				const dummyGain = ctx.createGain();
+				dummyGain.gain.value = 0;
+				this.micGain.connect(dummyGain);
+				dummyGain.connect(ctx.destination);
 
-			if (ctx.state === "suspended") {
-				void ctx.resume().catch(() => {});
+				if (ctx.state === "suspended") {
+					void ctx.resume().catch(() => {});
+				}
+
+				this.updateGain();
+				this.startVad();
+				this.reconnectPeers();
+				this.checkBroadcasterRole();
+				this.notify();
+				return true;
+			} catch (err) {
+				console.warn("[Voice] Microphone access failed or denied:", err);
+				return false;
+			} finally {
+				this.micInitPromise = null;
 			}
+		})();
 
-			this.updateGain();
-			this.startVad();
-			this.reconnectPeers();
-			this.checkBroadcasterRole();
-			this.notify();
-			return true;
-		} catch (err) {
-			console.warn("[Voice] Microphone access failed or denied:", err);
-			return false;
-		}
+		return this.micInitPromise;
 	}
 
 	private updateGain(): void {
@@ -284,7 +292,13 @@ export class VoiceManager {
 	): void {
 		this.nodeUrl = nodeUrl;
 		this.sendWs = sendWs;
-		this.occupiedSeats = [...occupied].sort((a, b) => a - b);
+
+		// CRUCIAL: Garante que os meus assentos estejam sempre no conjunto de assentos ocupados,
+		// mesmo antes de o servidor WebSocket enviar o broadcast de "status" com o novo array occupied.
+		const allOccupied = new Set<number>(occupied);
+		for (const s of mySeats) allOccupied.add(s);
+		this.occupiedSeats = Array.from(allOccupied).sort((a, b) => a - b);
+
 		const prevSeat = this.mySeat;
 		this.mySeat = mySeats.length > 0 ? mySeats[0] : null;
 
@@ -469,6 +483,8 @@ export class VoiceManager {
 			if (!this.whipHandle) {
 				this.isBroadcasting = false;
 				this.notify();
+				// Se ainda devemos transmitir, agenda nova tentativa automática
+				setTimeout(() => this.checkBroadcasterRole(), 2500);
 				return;
 			}
 			this.whipHandle.pc.addEventListener("connectionstatechange", () => {
@@ -482,6 +498,7 @@ export class VoiceManager {
 			console.warn("[Voice] WHIP broadcast failed:", err);
 			this.isBroadcasting = false;
 			this.notify();
+			setTimeout(() => this.checkBroadcasterRole(), 2500);
 		}
 	}
 

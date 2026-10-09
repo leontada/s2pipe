@@ -176,6 +176,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	const whepRef = useRef<WhepHandle | null>(null);
 	const audioRef = useRef<AudioWhepHandle | null>(null);
 	const voiceRef = useRef<AudioWhepHandle | null>(null);
+	const connectVoiceRef = useRef<(() => void) | null>(null);
 	const wsRef = useRef<WebSocket | null>(null);
 	const inputRef = useRef<ReturnType<typeof createInputTracker> | null>(null);
 	const virtualRef = useRef<VirtualPad | null>(null);
@@ -614,17 +615,19 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							void voiceHandle?.close();
 							voiceHandle = null;
 							if (voiceRef.current === handle) voiceRef.current = null;
-							voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 2500);
+							if (occupied.value.length > 0) {
+								voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 2000);
+							}
 						}
 					});
 				} else {
-					if (!cancelled && !hasSeat) {
-						voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 3000);
+					if (!cancelled && !hasSeat && occupied.value.length > 0) {
+						voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 2500);
 					}
 				}
 			} catch {
-				if (!cancelled && !hasSeat) {
-					voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 3000);
+				if (!cancelled && !hasSeat && occupied.value.length > 0) {
+					voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 2500);
 				}
 			}
 		};
@@ -699,7 +702,10 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			}
 
 			// Espectadores escutam a conversa dos jogadores via WHEP broadcast resiliente
-			if (!hasSeat) {
+			connectVoiceRef.current = () => {
+				if (!cancelled && !hasSeat) void connectVoice(activeUrl);
+			};
+			if (!hasSeat && occupied.value.length > 0) {
 				void connectVoice(activeUrl);
 			}
 		};
@@ -710,6 +716,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			cancelled = true;
 			clearTimeout(retryTimer);
 			clearTimeout(voiceRetryTimer);
+			connectVoiceRef.current = null;
 			if (video) {
 				try {
 					video.pause();
@@ -1300,6 +1307,24 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			occupied.value,
 		);
 	}, [nodeUrl, seats.value, occupied.value]);
+
+	// Sincronização proativa do canal de voz para espectadores:
+	// Conecta assim que houver jogadores ativos, ou desconecta quando a sala estiver vazia
+	useEffect(() => {
+		const isSpectator = seats.value.length === 0;
+		if (!isSpectator) return;
+
+		if (occupied.value.length > 0) {
+			if (!voiceRef.current && connectVoiceRef.current) {
+				connectVoiceRef.current();
+			}
+		} else {
+			if (voiceRef.current) {
+				void voiceRef.current.close();
+				voiceRef.current = null;
+			}
+		}
+	}, [occupied.value.length, seats.value.length]);
 
 	// Synchro Volume / Mute (Jogo e Vozes)
 	useEffect(() => {
