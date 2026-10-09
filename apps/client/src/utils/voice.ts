@@ -115,12 +115,18 @@ export class VoiceManager {
 	public setPttPressed(pressed: boolean): void {
 		if (this.config.mode !== "ptt") return;
 		if (this.isPttActive === pressed) return;
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			void this.audioCtx.resume().catch(() => {});
+		}
 		this.isPttActive = pressed;
 		this.updateGain();
 		this.notify();
 	}
 
 	public toggleMute(): void {
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			void this.audioCtx.resume().catch(() => {});
+		}
 		if (this.config.mode === "ptt") {
 			this.isPttActive = !this.isPttActive;
 		} else {
@@ -180,6 +186,7 @@ export class VoiceManager {
 			this.updateGain();
 			this.startVad();
 			this.reconnectPeers();
+			this.checkBroadcasterRole();
 			this.notify();
 			return true;
 		} catch (err) {
@@ -421,6 +428,18 @@ export class VoiceManager {
 				this.masterDestination.stream,
 				"/switch-voice/whip",
 			);
+			if (!this.whipHandle) {
+				this.isBroadcasting = false;
+				this.notify();
+				return;
+			}
+			this.whipHandle.pc.addEventListener("connectionstatechange", () => {
+				const state = this.whipHandle?.pc.connectionState;
+				if (state === "failed" || state === "closed") {
+					this.stopBroadcast();
+					this.checkBroadcasterRole();
+				}
+			});
 		} catch (err) {
 			console.warn("[Voice] WHIP broadcast failed:", err);
 			this.isBroadcasting = false;
@@ -448,6 +467,17 @@ export class VoiceManager {
 	public updateSeatState(seat: number, talking: boolean, muted: boolean): void {
 		this.roster.set(seat, { seat, talking, muted });
 		this.notify();
+	}
+
+	public resumeAudios(): void {
+		if (this.audioCtx && this.audioCtx.state === "suspended") {
+			void this.audioCtx.resume().catch(() => {});
+		}
+		for (const audio of this.peerAudios.values()) {
+			if (audio.paused) {
+				void audio.play().catch(() => {});
+			}
+		}
 	}
 
 	public destroy(): void {

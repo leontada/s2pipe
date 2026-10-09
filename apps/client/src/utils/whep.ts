@@ -146,6 +146,7 @@ export async function startAudioWhep(
 	const pc = new RTCPeerConnection(ice);
 	const audio = new Audio();
 	audio.autoplay = true;
+	audio.setAttribute("playsinline", "true");
 	pc.addTransceiver("audio", { direction: "recvonly" });
 	pc.addEventListener("track", (event) => {
 		if (event.track.kind !== "audio") return;

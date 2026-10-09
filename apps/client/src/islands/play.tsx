@@ -571,12 +571,14 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		let audioHandle: AudioWhepHandle | null = null;
 		let voiceHandle: AudioWhepHandle | null = null;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		let voiceRetryTimer: ReturnType<typeof setTimeout> | undefined;
 		let iceHinted = false;
 
 		const hasSeat = seats.value.length > 0;
 		const targetUrl = (hasSeat || !relayUrl) ? nodeUrl : relayUrl;
 
 		const cleanupWhep = () => {
+			clearTimeout(voiceRetryTimer);
 			void videoHandle?.close();
 			void audioHandle?.close();
 			void voiceHandle?.close();
@@ -586,6 +588,45 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 			if (whepRef.current === videoHandle) whepRef.current = null;
 			if (audioRef.current === audioHandle) audioRef.current = null;
 			if (voiceRef.current === voiceHandle) voiceRef.current = null;
+		};
+
+		const connectVoice = async (activeUrl: string) => {
+			if (cancelled || hasSeat) return;
+			if (voiceHandle && voiceHandle.pc.connectionState !== "closed" && voiceHandle.pc.connectionState !== "failed") {
+				return;
+			}
+			try {
+				const handle = await startAudioWhep(activeUrl, "/switch-voice/whep");
+				if (cancelled || hasSeat) {
+					void handle?.close();
+					return;
+				}
+				if (handle) {
+					voiceHandle = handle;
+					voiceRef.current = handle;
+					handle.audio.muted = voiceMuted.value || stealthMode.value;
+					handle.audio.volume = voiceVolume.value;
+					if (!handle.audio.muted) {
+						void handle.audio.play().catch(() => {});
+					}
+					onWhepDead(handle.pc, () => {
+						if (!cancelled && !hasSeat) {
+							void voiceHandle?.close();
+							voiceHandle = null;
+							if (voiceRef.current === handle) voiceRef.current = null;
+							voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 2500);
+						}
+					});
+				} else {
+					if (!cancelled && !hasSeat) {
+						voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 3000);
+					}
+				}
+			} catch {
+				if (!cancelled && !hasSeat) {
+					voiceRetryTimer = globalThis.setTimeout(() => connectVoice(activeUrl), 3000);
+				}
+			}
 		};
 
 		const connect = async () => {
@@ -657,22 +698,9 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				// L'audio peut échouer sans bloquer la vidéo
 			}
 
-			// Espectadores escutam a conversa dos jogadores via WHEP broadcast
+			// Espectadores escutam a conversa dos jogadores via WHEP broadcast resiliente
 			if (!hasSeat) {
-				try {
-					voiceHandle = await startAudioWhep(activeUrl, "/switch-voice/whep");
-					if (voiceHandle) {
-						if (cancelled) {
-							void voiceHandle.close();
-							return;
-						}
-						voiceRef.current = voiceHandle;
-						voiceHandle.audio.muted = voiceMuted.value;
-						voiceHandle.audio.volume = voiceVolume.value;
-					}
-				} catch {
-					// Voice broadcast pode estar inativo
-				}
+				void connectVoice(activeUrl);
 			}
 		};
 
@@ -681,6 +709,7 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 		return holdPage(() => {
 			cancelled = true;
 			clearTimeout(retryTimer);
+			clearTimeout(voiceRetryTimer);
 			if (video) {
 				try {
 					video.pause();
@@ -1286,16 +1315,47 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 				} else {
 					audio.muted = muted.value;
 					audio.volume = volume.value;
+					if (!audio.muted && audio.paused) {
+						void audio.play().catch(() => {});
+					}
 				}
 			}
 		}
 
 		const voiceAudio = voiceRef.current?.audio;
 		if (voiceAudio) {
-			voiceAudio.muted = voiceMuted.value || stealthMode.value;
+			const isVoiceMuted = voiceMuted.value || stealthMode.value;
+			voiceAudio.muted = isVoiceMuted;
 			voiceAudio.volume = voiceVolume.value;
+			if (!isVoiceMuted && voiceAudio.paused) {
+				void voiceAudio.play().catch(() => {});
+			}
 		}
 	}, [muted.value, volume.value, voiceMuted.value, voiceVolume.value, live.value, privacyMode.value, adminAuthed.value, stealthMode.value]);
+
+	// Recuperação proativa de áudio contra bloqueio de autoplay do navegador
+	useEffect(() => {
+		const resumeAllAudio = () => {
+			const gameAudio = audioRef.current?.audio;
+			if (gameAudio && gameAudio.paused && !muted.value && !stealthMode.value) {
+				void gameAudio.play().catch(() => {});
+			}
+			const voiceAudio = voiceRef.current?.audio;
+			if (voiceAudio && voiceAudio.paused && !voiceMuted.value && !stealthMode.value) {
+				void voiceAudio.play().catch(() => {});
+			}
+			voiceManager.resumeAudios();
+		};
+
+		window.addEventListener("pointerdown", resumeAllAudio, { passive: true });
+		window.addEventListener("keydown", resumeAllAudio, { passive: true });
+		window.addEventListener("touchstart", resumeAllAudio, { passive: true });
+		return holdPage(() => {
+			window.removeEventListener("pointerdown", resumeAllAudio);
+			window.removeEventListener("keydown", resumeAllAudio);
+			window.removeEventListener("touchstart", resumeAllAudio);
+		});
+	}, [muted.value, voiceMuted.value, stealthMode.value]);
 
 	// Detecção inteligente de Standby / Console em Repouso
 	useEffect(() => {
@@ -1572,6 +1632,8 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 	function onStageClick(): void {
 		void videoRef.current?.play();
 		void audioRef.current?.audio.play();
+		void voiceRef.current?.audio.play();
+		voiceManager.resumeAudios();
 		if (settings.value) return;
 		const virtual = virtualRef.current;
 		if (!virtual || !virtualPrefs.value.enabled) return;
@@ -2078,7 +2140,14 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							type="button"
 							class="btn btn-icon"
 							aria-label={muted.value ? "Unmute" : "Mute"}
-							onClick={() => muted.value = !muted.value}
+							onClick={() => {
+								const next = !muted.value;
+								muted.value = next;
+								if (!next && audioRef.current?.audio) {
+									audioRef.current.audio.muted = false;
+									void audioRef.current.audio.play().catch(() => {});
+								}
+							}}
 						>
 							{muted.value ? <VolumeX size={16} /> : <Volume2 size={16} />}
 						</button>
@@ -2108,7 +2177,14 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 								class="btn btn-icon"
 								aria-label={voiceMuted.value ? "Desmutar Vozes da Sala" : "Mutar Vozes da Sala"}
 								title={voiceMuted.value ? "Vozes da Sala Mutadas (Clique para ouvir)" : `Vozes da Sala (${Math.round(voiceVolume.value * 100)}%)`}
-								onClick={() => voiceMuted.value = !voiceMuted.value}
+								onClick={() => {
+									const next = !voiceMuted.value;
+									voiceMuted.value = next;
+									if (!next && voiceRef.current?.audio) {
+										voiceRef.current.audio.muted = false;
+										void voiceRef.current.audio.play().catch(() => {});
+									}
+								}}
 							>
 								{voiceMuted.value ? <MicOff size={16} /> : <Radio size={16} />}
 							</button>
@@ -2322,7 +2398,14 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							<button
 								type="button"
 								class="btn btn-xs btn-outline"
-								onClick={() => voiceMuted.value = !voiceMuted.value}
+								onClick={() => {
+									const next = !voiceMuted.value;
+									voiceMuted.value = next;
+									if (!next && voiceRef.current?.audio) {
+										voiceRef.current.audio.muted = false;
+										void voiceRef.current.audio.play().catch(() => {});
+									}
+								}}
 							>
 								{voiceMuted.value ? "Desmutar" : "Mutar"}
 							</button>
@@ -2336,8 +2419,15 @@ export default function Play({ nodeUrl, relayUrl, nodeLocked, turnstileSiteKey }
 							step="0.05"
 							value={voiceVolume.value}
 							onInput={(event) => {
-								voiceVolume.value = Number((event.target as HTMLInputElement).value);
-								if (voiceVolume.value > 0) voiceMuted.value = false;
+								const val = Number((event.target as HTMLInputElement).value);
+								voiceVolume.value = val;
+								if (val > 0) {
+									voiceMuted.value = false;
+									if (voiceRef.current?.audio) {
+										voiceRef.current.audio.muted = false;
+										void voiceRef.current.audio.play().catch(() => {});
+									}
+								}
 							}}
 						/>
 					</label>
